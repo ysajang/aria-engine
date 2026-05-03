@@ -213,6 +213,24 @@ class DuckDuckGoConfig(BaseSettings):
         return self.enabled
 
 
+class GoogleMapsConfig(BaseSettings):
+    """Google Maps Platform API 설정
+
+    API Key 기반 인증 (OAuth 불필요)
+    발급: https://console.cloud.google.com/apis/credentials
+    활성화 필요: Places API (New) / Geocoding API / Directions API
+    """
+
+    model_config = SettingsConfigDict(env_prefix="ARIA_GOOGLE_MAPS_", env_file=_get_env_file(), extra="ignore")
+
+    api_key: str = Field(default="", description="Google Maps Platform API Key")
+    request_timeout: int = Field(default=15, ge=5, le=60, description="API 요청 타임아웃 (초)")
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.api_key)
+
+
 class AlertConfig(BaseSettings):
     """능동 알림 시스템 설정"""
 
@@ -305,6 +323,7 @@ class AriaConfig(BaseSettings):
     naver_search: NaverSearchConfig = Field(default_factory=NaverSearchConfig)
     tmap: TmapConfig = Field(default_factory=TmapConfig)
     ddg: DuckDuckGoConfig = Field(default_factory=DuckDuckGoConfig)
+    google_maps: GoogleMapsConfig = Field(default_factory=GoogleMapsConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     event: EventConfig = Field(default_factory=EventConfig)
     alert: AlertConfig = Field(default_factory=AlertConfig)

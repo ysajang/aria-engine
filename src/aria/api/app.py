@@ -196,6 +196,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("ddg_tools_skipped", reason="ARIA_DDG_ENABLED=false")
 
+    # MCP Tools — Google Maps Platform (API Key 기반 / 글로벌 장소 검색)
+    if config.google_maps.is_configured:
+        from aria.tools.mcp.google_maps_tools import (
+            GoogleMapsClient,
+            GooglePlacesSearchTool,
+            GoogleGeocodeTool,
+            GoogleDirectionsTool,
+        )
+        google_maps_client = GoogleMapsClient(config.google_maps)
+        tool_registry.register_executor(GooglePlacesSearchTool(google_maps_client))
+        tool_registry.register_executor(GoogleGeocodeTool(google_maps_client))
+        tool_registry.register_executor(GoogleDirectionsTool(google_maps_client))
+        logger.info("google_maps_tools_registered", tools=3)
+    else:
+        logger.info("google_maps_tools_skipped", reason="ARIA_GOOGLE_MAPS_API_KEY not set")
+
     # MCP Tools — 서버 자동 모니터링 (API 키 불필요 / 기본 활성화)
     if config.monitoring.is_configured:
         from aria.tools.mcp.server_monitor_tools import (
