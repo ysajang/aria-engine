@@ -34,6 +34,11 @@ class AlertType(str, Enum):
     LOW_CONFIDENCE = "low_confidence"       # 낮은 confidence 응답
     MEMORY_CONFLICT = "memory_conflict"     # 메모리 버전 충돌
     SERVER_ERROR = "server_error"           # 서버 내부 에러
+    # --- 서버 모니터링 (v0.3.0) ---
+    HEALTH_CHECK_FAILED = "health_check_failed"     # 헬스체크 실패
+    TRAFFIC_ANOMALY = "traffic_anomaly"             # 트래픽 이상 감지
+    SECURITY_ISSUE = "security_issue"               # 보안 취약점 발견
+    ERROR_SPIKE = "error_spike"                     # 에러 로그 급증
 
 
 # 알림별 텔레그램 이모지 매핑
@@ -45,6 +50,10 @@ ALERT_EMOJI: dict[AlertType, str] = {
     AlertType.LOW_CONFIDENCE: "🤔",
     AlertType.MEMORY_CONFLICT: "🔄",
     AlertType.SERVER_ERROR: "💥",
+    AlertType.HEALTH_CHECK_FAILED: "🔌",
+    AlertType.TRAFFIC_ANOMALY: "📈",
+    AlertType.SECURITY_ISSUE: "🛡️",
+    AlertType.ERROR_SPIKE: "📊",
 }
 
 # 알림별 기본 쿨다운 (초)
@@ -56,6 +65,10 @@ DEFAULT_COOLDOWNS: dict[AlertType, int] = {
     AlertType.LOW_CONFIDENCE: 3600,     # 1시간
     AlertType.MEMORY_CONFLICT: 3600,    # 1시간
     AlertType.SERVER_ERROR: 600,        # 10분
+    AlertType.HEALTH_CHECK_FAILED: 300, # 5분 (cron 5분 주기와 동일)
+    AlertType.TRAFFIC_ANOMALY: 900,     # 15분 (cron 15분 주기와 동일)
+    AlertType.SECURITY_ISSUE: 86400,    # 24시간 (cron 1일 1회)
+    AlertType.ERROR_SPIKE: 1800,        # 30분 (cron 30분 주기와 동일)
 }
 
 

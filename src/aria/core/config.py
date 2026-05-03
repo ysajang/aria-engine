@@ -235,6 +235,60 @@ class EventConfig(BaseSettings):
     retention_days: int = Field(default=30, ge=1, le=365, description="이벤트 보관 기간 (일)")
 
 
+class MonitoringConfig(BaseSettings):
+    """서버 자동 모니터링 설정
+
+    cron 스크립트 + ARIA Tool 공용
+    환경변수 prefix: ARIA_MONITOR_
+    """
+
+    model_config = SettingsConfigDict(env_prefix="ARIA_MONITOR_", env_file=_get_env_file(), extra="ignore")
+
+    enabled: bool = Field(default=True, description="모니터링 도구 활성화")
+    targets: str = Field(
+        default="",
+        description="헬스체크 대상 URL 목록 (쉼표 구분 / 예: https://testorum.app,https://talksim.app)",
+    )
+    log_paths: str = Field(
+        default="",
+        description="에러 로그 파일 경로 (쉼표 구분 / 예: /var/log/nginx/error.log)",
+    )
+    check_ports: str = Field(
+        default="22,80,443,3306,5432,6379,8100",
+        description="보안 스캔 시 체크할 포트 목록 (쉼표 구분)",
+    )
+    healthcheck_timeout: float = Field(default=10.0, ge=1.0, le=60.0, description="헬스체크 타임아웃 (초)")
+    anomaly_threshold: float = Field(default=3.0, ge=1.5, le=10.0, description="트래픽 이상 판정 배수")
+
+    @property
+    def is_configured(self) -> bool:
+        return self.enabled
+
+    @property
+    def target_urls(self) -> list[str]:
+        """파싱된 타겟 URL 목록"""
+        if not self.targets:
+            return []
+        return [u.strip() for u in self.targets.split(",") if u.strip()]
+
+    @property
+    def log_path_list(self) -> list[str]:
+        """파싱된 로그 경로 목록"""
+        if not self.log_paths:
+            return []
+        return [p.strip() for p in self.log_paths.split(",") if p.strip()]
+
+    @property
+    def port_list(self) -> list[int]:
+        """파싱된 포트 목록"""
+        if not self.check_ports:
+            return []
+        try:
+            return [int(p.strip()) for p in self.check_ports.split(",") if p.strip()]
+        except ValueError:
+            return [22, 80, 443, 8100]
+
+
 class AriaConfig(BaseSettings):
     """ARIA 통합 설정"""
 
@@ -251,6 +305,7 @@ class AriaConfig(BaseSettings):
     naver_search: NaverSearchConfig = Field(default_factory=NaverSearchConfig)
     tmap: TmapConfig = Field(default_factory=TmapConfig)
     ddg: DuckDuckGoConfig = Field(default_factory=DuckDuckGoConfig)
+    monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     event: EventConfig = Field(default_factory=EventConfig)
     alert: AlertConfig = Field(default_factory=AlertConfig)
 

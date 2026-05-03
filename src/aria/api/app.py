@@ -196,6 +196,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("ddg_tools_skipped", reason="ARIA_DDG_ENABLED=false")
 
+    # MCP Tools — 서버 자동 모니터링 (API 키 불필요 / 기본 활성화)
+    if config.monitoring.is_configured:
+        from aria.tools.mcp.server_monitor_tools import (
+            ServerHealthcheckTool,
+            ServerErrorLogTool,
+            ServerTrafficTool,
+            ServerSecurityScanTool,
+        )
+        tool_registry.register_executor(ServerHealthcheckTool())
+        tool_registry.register_executor(ServerErrorLogTool())
+        tool_registry.register_executor(ServerTrafficTool())
+        tool_registry.register_executor(ServerSecurityScanTool())
+        logger.info("monitoring_tools_registered", tools=4)
+    else:
+        logger.info("monitoring_tools_skipped", reason="ARIA_MONITOR_ENABLED=false")
+
     react_agent = ReActAgent(
         llm_provider,
         vector_store,
@@ -238,6 +254,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         tools_registered=tool_registry.tool_count,
         event_store_path=config.event.base_path,
         alerts_enabled=alert_manager.enabled,
+        monitoring_enabled=config.monitoring.is_configured,
     )
     yield
     logger.info("aria_engine_stopped")
@@ -912,6 +929,74 @@ def _require_event_store() -> EventStore:
     return event_store
 
 
+async def _evaluate_monitoring_event(event: Any) -> None:
+    """모니터링 이벤트 수신 시 AlertManager 자동 평가
+
+    cron 스크립트가 POST /v1/events로 보낸 모니터링 결과를
+    AlertManager가 평가하여 필요 시 텔레그램 알림 발송
+
+    지원 event_type:
+    - health_check → check_health()
+    - error_log_analysis → check_error_spike()
+    - traffic_analysis → check_traffic_anomaly()
+    - security_scan → check_security_issue()
+    """
+    if alert_manager is None:
+        return
+
+    try:
+        et = event.event_type
+        data = event.data or {}
+
+        if et == "health_check":
+            await alert_manager.check_health(
+                url=data.get("url", "unknown"),
+                status=data.get("status", "unknown"),
+                status_code=data.get("status_code", 0),
+                response_time_ms=data.get("response_time_ms", 0),
+                ssl_expiry_days=data.get("ssl_expiry_days"),
+                error=data.get("error"),
+            )
+
+        elif et == "error_log_analysis":
+            error_count = data.get("error_count", 0)
+            if error_count >= 10:
+                await alert_manager.check_error_spike(
+                    log_path=data.get("log_path", "unknown"),
+                    error_count=error_count,
+                    top_errors=data.get("top_error_messages"),
+                )
+
+        elif et == "traffic_analysis":
+            if data.get("anomaly_detected"):
+                await alert_manager.check_traffic_anomaly(
+                    log_path=data.get("log_path", "unknown"),
+                    current_rpm=data.get("current_rpm", 0),
+                    baseline_rpm=data.get("baseline_rpm", 0),
+                    ratio=data.get("ratio", 0),
+                    top_ips=data.get("top_ips"),
+                )
+
+        elif et == "security_scan":
+            issues = data.get("issues", [])
+            high_issues = [i for i in issues if i.get("severity") == "high"]
+            if high_issues:
+                await alert_manager.check_security_issue(
+                    url=data.get("url", "unknown"),
+                    headers_score=data.get("headers_score", 0),
+                    headers_max_score=data.get("headers_max_score", 0),
+                    issues=issues,
+                )
+
+    except Exception as e:
+        # 알림 평가 실패는 이벤트 인입에 영향 없음
+        logger.warning(
+            "monitoring_event_eval_failed",
+            event_type=getattr(event, "event_type", "unknown"),
+            error=str(e)[:200],
+        )
+
+
 @app.post(
     "/v1/events",
     summary="이벤트 수집",
@@ -922,6 +1007,8 @@ async def ingest_events(request: EventIngestRequest) -> JSONResponse:
     """제품(Testorum/Talksim/AutoTube)에서 이벤트 인입
 
     배치 인입 지원 (최대 100개/요청)
+    모니터링 이벤트(source=aria, event_type=health_check|error_log_analysis|traffic_analysis|security_scan)는
+    AlertManager 자동 평가 → 텔레그램 알림 발송
     """
     store = _require_event_store()
 
@@ -934,6 +1021,14 @@ async def ingest_events(request: EventIngestRequest) -> JSONResponse:
             count=len(events),
             sources=list({e.source for e in events}),
         )
+
+        # 모니터링 이벤트 자동 알림 평가
+        if alert_manager and alert_manager.enabled:
+            for event in events:
+                if event.source == "aria":
+                    asyncio.create_task(
+                        _evaluate_monitoring_event(event)
+                    )
 
         return JSONResponse(content={
             "status": "ok",

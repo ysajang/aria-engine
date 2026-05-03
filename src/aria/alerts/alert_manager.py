@@ -302,6 +302,168 @@ class AlertManager:
             "seconds_since_last": last_sent_info,
         }
 
+    # === 서버 모니터링 알림 ===
+
+    async def check_health(
+        self,
+        url: str,
+        status: str,
+        status_code: int = 0,
+        response_time_ms: float = 0.0,
+        ssl_expiry_days: int | None = None,
+        error: str | None = None,
+    ) -> Alert | None:
+        """헬스체크 실패 알림
+
+        Args:
+            url: 체크한 URL
+            status: 상태 (healthy / unreachable / timeout / server_error)
+            status_code: HTTP 상태코드
+            response_time_ms: 응답시간 (ms)
+            ssl_expiry_days: SSL 만료까지 남은 일수
+            error: 에러 메시지
+        """
+        if not self.enabled:
+            return None
+
+        # 정상이면 SSL 만료 경고만 체크
+        if status == "healthy":
+            if ssl_expiry_days is not None and ssl_expiry_days < 14:
+                alert = Alert(
+                    alert_type=AlertType.HEALTH_CHECK_FAILED,
+                    level=AlertLevel.WARNING,
+                    title=f"SSL 인증서 곧 만료 — {url}",
+                    message=(
+                        f"SSL 만료까지 {ssl_expiry_days}일 남음\n"
+                        f"갱신이 필요합니다"
+                    ),
+                    data={"url": url, "ssl_expiry_days": ssl_expiry_days},
+                )
+                return await self._send_alert(alert)
+            return None
+
+        # 비정상 상태
+        detail_parts = [f"상태: {status}"]
+        if status_code:
+            detail_parts.append(f"HTTP {status_code}")
+        if response_time_ms > 0:
+            detail_parts.append(f"응답시간: {response_time_ms:.0f}ms")
+        if error:
+            detail_parts.append(f"에러: {error[:150]}")
+
+        level = AlertLevel.CRITICAL if status in ("unreachable", "timeout") else AlertLevel.WARNING
+
+        alert = Alert(
+            alert_type=AlertType.HEALTH_CHECK_FAILED,
+            level=level,
+            title=f"서버 다운 감지 — {url}",
+            message="\n".join(detail_parts),
+            data={"url": url, "status": status, "status_code": status_code},
+        )
+        return await self._send_alert(alert)
+
+    async def check_traffic_anomaly(
+        self,
+        log_path: str,
+        current_rpm: float,
+        baseline_rpm: float,
+        ratio: float,
+        top_ips: list[dict] | None = None,
+    ) -> Alert | None:
+        """트래픽 이상 알림"""
+        if not self.enabled:
+            return None
+
+        level = AlertLevel.CRITICAL if ratio >= 5.0 else AlertLevel.WARNING
+        ip_info = ""
+        if top_ips:
+            ip_info = "\n상위 IP: " + " / ".join(
+                f"{ip['ip']}({ip['count']})" for ip in top_ips[:3]
+            )
+
+        alert = Alert(
+            alert_type=AlertType.TRAFFIC_ANOMALY,
+            level=level,
+            title=f"트래픽 이상 감지 ({ratio:.1f}x)",
+            message=(
+                f"현재: {current_rpm:.1f} rpm / 평균: {baseline_rpm:.1f} rpm\n"
+                f"비율: {ratio:.1f}x (임계치 초과){ip_info}"
+            ),
+            data={
+                "current_rpm": current_rpm,
+                "baseline_rpm": baseline_rpm,
+                "ratio": ratio,
+            },
+        )
+        return await self._send_alert(alert)
+
+    async def check_security_issue(
+        self,
+        url: str,
+        headers_score: int,
+        headers_max_score: int,
+        issues: list[dict],
+    ) -> Alert | None:
+        """보안 취약점 알림 (high severity 이슈가 있을 때만)"""
+        if not self.enabled:
+            return None
+
+        high_issues = [i for i in issues if i.get("severity") == "high"]
+        if not high_issues:
+            return None
+
+        issue_summary = "\n".join(
+            f"• {i['detail']}" for i in high_issues[:5]
+        )
+
+        alert = Alert(
+            alert_type=AlertType.SECURITY_ISSUE,
+            level=AlertLevel.CRITICAL if len(high_issues) >= 3 else AlertLevel.WARNING,
+            title=f"보안 취약점 발견 — {url}",
+            message=(
+                f"보안 점수: {headers_score}/{headers_max_score}\n"
+                f"고위험 이슈 {len(high_issues)}건:\n{issue_summary}"
+            ),
+            data={
+                "url": url,
+                "score": f"{headers_score}/{headers_max_score}",
+                "high_issues": len(high_issues),
+            },
+        )
+        return await self._send_alert(alert)
+
+    async def check_error_spike(
+        self,
+        log_path: str,
+        error_count: int,
+        top_errors: list[dict] | None = None,
+    ) -> Alert | None:
+        """에러 로그 급증 알림"""
+        if not self.enabled:
+            return None
+
+        if error_count < 10:
+            return None
+
+        level = AlertLevel.CRITICAL if error_count >= 50 else AlertLevel.WARNING
+        error_detail = ""
+        if top_errors:
+            error_detail = "\n주요 에러:\n" + "\n".join(
+                f"  {e['message'][:80]} ({e['count']}회)" for e in top_errors[:3]
+            )
+
+        alert = Alert(
+            alert_type=AlertType.ERROR_SPIKE,
+            level=level,
+            title=f"에러 급증 — {error_count}건",
+            message=(
+                f"로그: {log_path}\n"
+                f"최근 분석 구간에서 에러 {error_count}건 감지{error_detail}"
+            ),
+            data={"log_path": log_path, "error_count": error_count},
+        )
+        return await self._send_alert(alert)
+
     # === Internal ===
 
     def _is_in_cooldown(self, alert_type: AlertType) -> bool:
