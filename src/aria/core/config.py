@@ -231,8 +231,34 @@ class GoogleMapsConfig(BaseSettings):
         return bool(self.api_key)
 
 
+class GoogleOAuthConfig(BaseSettings):
+    """Google OAuth2 설정 (Gmail + Calendar 공용)
+
+    최초 인증: scripts/google_auth_setup.py 실행 → refresh_token 획득
+    런타임: refresh_token으로 access_token 자동 갱신
+    """
+
+    model_config = SettingsConfigDict(env_prefix="ARIA_GOOGLE_OAUTH_", env_file=_get_env_file(), extra="ignore")
+
+    client_id: str = Field(default="", description="OAuth2 클라이언트 ID")
+    client_secret: str = Field(default="", description="OAuth2 클라이언트 시크릿")
+    refresh_token: str = Field(default="", description="OAuth2 리프레시 토큰 (최초 인증 후 획득)")
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.client_id and self.client_secret and self.refresh_token)
+
+
 class AlertConfig(BaseSettings):
     """능동 알림 시스템 설정"""
+
+    model_config = SettingsConfigDict(env_prefix="ARIA_ALERT_", env_file=_get_env_file(), extra="ignore")
+
+    enabled: bool = Field(default=True, description="능동 알림 활성화")
+    cost_warning_threshold: float = Field(default=0.7, ge=0.1, le=1.0, description="비용 경고 임계치 (비율)")
+    cost_critical_threshold: float = Field(default=0.9, ge=0.1, le=1.0, description="비용 긴급 임계치 (비율)")
+    confidence_threshold: float = Field(default=0.3, ge=0.0, le=1.0, description="낮은 confidence 임계치")
+    consecutive_error_threshold: int = Field(default=3, ge=1, le=20, description="연속 에러 알림 임계치")
 
     model_config = SettingsConfigDict(env_prefix="ARIA_ALERT_", env_file=_get_env_file(), extra="ignore")
 
@@ -324,6 +350,7 @@ class AriaConfig(BaseSettings):
     tmap: TmapConfig = Field(default_factory=TmapConfig)
     ddg: DuckDuckGoConfig = Field(default_factory=DuckDuckGoConfig)
     google_maps: GoogleMapsConfig = Field(default_factory=GoogleMapsConfig)
+    google_oauth: GoogleOAuthConfig = Field(default_factory=GoogleOAuthConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     event: EventConfig = Field(default_factory=EventConfig)
     alert: AlertConfig = Field(default_factory=AlertConfig)

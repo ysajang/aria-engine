@@ -212,6 +212,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("google_maps_tools_skipped", reason="ARIA_GOOGLE_MAPS_API_KEY not set")
 
+    # MCP Tools — Gmail + Google Calendar (OAuth2)
+    if config.google_oauth.is_configured:
+        from aria.auth.google_oauth import GoogleTokenManager
+        from aria.tools.mcp.gmail_tools import (
+            GmailClient,
+            GmailSearchTool,
+            GmailReadTool,
+            GmailSendTool,
+            GmailDraftTool,
+        )
+        from aria.tools.mcp.gcal_tools import (
+            GCalClient,
+            GCalListEventsTool,
+            GCalCreateEventTool,
+            GCalUpdateEventTool,
+        )
+        google_token_mgr = GoogleTokenManager(config.google_oauth)
+        gmail_client = GmailClient(google_token_mgr)
+        gcal_client = GCalClient(google_token_mgr)
+
+        tool_registry.register_executor(GmailSearchTool(gmail_client))
+        tool_registry.register_executor(GmailReadTool(gmail_client))
+        tool_registry.register_executor(GmailSendTool(gmail_client))
+        tool_registry.register_executor(GmailDraftTool(gmail_client))
+        tool_registry.register_executor(GCalListEventsTool(gcal_client))
+        tool_registry.register_executor(GCalCreateEventTool(gcal_client))
+        tool_registry.register_executor(GCalUpdateEventTool(gcal_client))
+        logger.info("google_oauth_tools_registered", tools=7, services="gmail+calendar")
+    else:
+        logger.info("google_oauth_tools_skipped", reason="ARIA_GOOGLE_OAUTH_* not configured")
+
     # MCP Tools — 서버 자동 모니터링 (API 키 불필요 / 기본 활성화)
     if config.monitoring.is_configured:
         from aria.tools.mcp.server_monitor_tools import (
