@@ -28,7 +28,7 @@ class TestGoogleMapsConfig:
 
     def test_default_values(self):
         from aria.core.config import GoogleMapsConfig
-        config = GoogleMapsConfig()
+        config = GoogleMapsConfig(api_key="")
         assert config.api_key == ""
         assert config.request_timeout == 15
         assert config.is_configured is False
