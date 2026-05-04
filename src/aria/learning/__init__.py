@@ -28,6 +28,7 @@ from aria.learning.conversation_learner import ConversationLearner
 from aria.learning.feedback_loop import FeedbackLoop
 from aria.learning.tool_optimizer import ToolOptimizer
 from aria.learning.prompt_improver import PromptImprover
+from aria.learning.pattern_predictor import PatternPredictor
 
 __all__ = [
     "BaseLearner",
@@ -38,6 +39,7 @@ __all__ = [
     "DomainInsight",
     "FeedbackLoop",
     "LearningEventType",
+    "PatternPredictor",
     "PatternType",
     "Preference",
     "PreferenceCategory",
