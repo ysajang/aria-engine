@@ -333,6 +333,40 @@ class MonitoringConfig(BaseSettings):
             return [22, 80, 443, 8100]
 
 
+class MCPConfig(BaseSettings):
+    """MCP (Model Context Protocol) 클라이언트 설정
+
+    Google Workspace MCP 서버 연동용
+    환경변수 prefix: ARIA_MCP_
+    """
+
+    model_config = SettingsConfigDict(env_prefix="ARIA_MCP_", env_file=_get_env_file(), extra="ignore")
+
+    enabled: bool = Field(default=True, description="MCP 클라이언트 활성화")
+    google_services: str = Field(
+        default="gmail,calendar,drive",
+        description="활성화할 Google MCP 서비스 (쉼표 구분 / 가능: gmail,calendar,drive)",
+    )
+    request_timeout: float = Field(default=30.0, ge=5.0, le=120.0, description="MCP 요청 타임아웃 (초)")
+    override_rest_tools: bool = Field(
+        default=True,
+        description="MCP 도구와 기존 REST 도구 충돌 시 REST 도구 비활성화",
+    )
+
+    @property
+    def is_configured(self) -> bool:
+        """MCP가 활성화되어 있고 서비스가 설정되어 있는지"""
+        return self.enabled and bool(self.google_services.strip())
+
+    @property
+    def enabled_google_services(self) -> set[str]:
+        """파싱된 활성화 서비스 세트"""
+        if not self.google_services:
+            return set()
+        valid = {"gmail", "calendar", "drive"}
+        return {s.strip().lower() for s in self.google_services.split(",") if s.strip().lower() in valid}
+
+
 class AriaConfig(BaseSettings):
     """ARIA 통합 설정"""
 
@@ -351,6 +385,7 @@ class AriaConfig(BaseSettings):
     ddg: DuckDuckGoConfig = Field(default_factory=DuckDuckGoConfig)
     google_maps: GoogleMapsConfig = Field(default_factory=GoogleMapsConfig)
     google_oauth: GoogleOAuthConfig = Field(default_factory=GoogleOAuthConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     event: EventConfig = Field(default_factory=EventConfig)
     alert: AlertConfig = Field(default_factory=AlertConfig)

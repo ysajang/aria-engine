@@ -259,6 +259,85 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("monitoring_tools_skipped", reason="ARIA_MONITOR_ENABLED=false")
 
+    # MCP Client — Google Workspace MCP 서버 연동 (OAuth2 필수)
+    mcp_clients: list = []
+    if config.mcp.is_configured and config.google_oauth.is_configured:
+        from aria.auth.google_oauth import GoogleTokenManager
+        from aria.mcp.client import MCPClient
+        from aria.mcp.google_servers import (
+            connect_google_mcp_servers,
+            get_google_mcp_configs,
+            get_rest_tools_to_disable,
+        )
+        from aria.mcp.tool_bridge import MCPToolBridge
+
+        # GoogleTokenManager 재사용 (REST 도구 블록에서 이미 생성됨)
+        # google_oauth.is_configured 조건이 동일하므로 google_token_mgr 변수 존재 보장
+
+        mcp_configs = get_google_mcp_configs(
+            enabled_services=config.mcp.enabled_google_services,
+        )
+
+        # 각 서버 연결 설정에 타임아웃 적용
+        for mc in mcp_configs:
+            mc.timeout = config.mcp.request_timeout
+
+        mcp_clients = await connect_google_mcp_servers(
+            mcp_configs,
+            token_provider=google_token_mgr.get_access_token,
+        )
+
+        if mcp_clients:
+            # MCP 도구 → ToolRegistry 자동 등록
+            mcp_bridge = MCPToolBridge(
+                tool_registry,
+                override_existing=config.mcp.override_rest_tools,
+            )
+
+            total_mcp_tools = 0
+            connected_services: set[str] = set()
+
+            for client in mcp_clients:
+                registered = await mcp_bridge.register_server(client)
+                total_mcp_tools += len(registered)
+                connected_services.add(client.server_name)
+
+            # MCP 우선 정책: 기존 REST 도구 비활성화
+            if config.mcp.override_rest_tools:
+                rest_disable_list = get_rest_tools_to_disable(connected_services)
+                disabled_count = 0
+                for rest_tool_name in rest_disable_list:
+                    if tool_registry.has_tool(rest_tool_name):
+                        defn, _ = tool_registry.get(rest_tool_name)
+                        defn.enabled = False
+                        disabled_count += 1
+
+                if disabled_count > 0:
+                    logger.info(
+                        "rest_tools_disabled_by_mcp",
+                        disabled=disabled_count,
+                        tools=rest_disable_list,
+                    )
+
+            logger.info(
+                "mcp_integration_complete",
+                servers_connected=len(mcp_clients),
+                mcp_tools_registered=total_mcp_tools,
+                services=list(connected_services),
+            )
+
+            # lifespan 종료 시 정리를 위해 app.state에 저장
+            app_state_mcp_clients = mcp_clients
+        else:
+            logger.warning("mcp_no_servers_connected")
+            app_state_mcp_clients = []
+    elif config.mcp.is_configured and not config.google_oauth.is_configured:
+        logger.info("mcp_skipped", reason="ARIA_GOOGLE_OAUTH_* not configured (OAuth2 필수)")
+        app_state_mcp_clients = []
+    else:
+        logger.info("mcp_skipped", reason="ARIA_MCP_ENABLED=false or no services configured")
+        app_state_mcp_clients = []
+
     react_agent = ReActAgent(
         llm_provider,
         vector_store,
@@ -304,6 +383,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         monitoring_enabled=config.monitoring.is_configured,
     )
     yield
+
+    # MCP 클라이언트 정리
+    for client in app_state_mcp_clients:
+        try:
+            await client.close()
+        except Exception:
+            pass
+
     logger.info("aria_engine_stopped")
 
 
