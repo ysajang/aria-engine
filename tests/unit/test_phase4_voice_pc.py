@@ -18,6 +18,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+# 테스트용 허용 경로 (실제 사용자명 노출 방지)
+_TEST_ALLOWED_PATHS = [
+    r"C:\Users\TestUser\Desktop",
+    r"C:\Users\TestUser\Documents",
+    r"C:\Users\TestUser\Downloads",
+    r"C:\Users\TestUser\Projects",
+]
+
+
 # ============================================================
 # 1. Config Tests (STTConfig / PCCommandConfig)
 # ============================================================
@@ -186,16 +195,17 @@ class TestPCCommandWhitelist:
         assert len(CLOSEABLE_APPS) > 0
 
 
+@patch("aria.tools.mcp.pc_command_tools.ALLOWED_FILE_PATHS", _TEST_ALLOWED_PATHS)
 class TestPathSafety:
     """경로 안전성 검증"""
 
     def test_safe_desktop_path(self) -> None:
         from aria.tools.mcp.pc_command_tools import _is_safe_path
-        assert _is_safe_path(r"C:\Users\${USER}\Desktop") is True
+        assert _is_safe_path(r"C:\Users\TestUser\Desktop") is True
 
     def test_safe_desktop_subpath(self) -> None:
         from aria.tools.mcp.pc_command_tools import _is_safe_path
-        assert _is_safe_path(r"C:\Users\${USER}\Desktop\projects") is True
+        assert _is_safe_path(r"C:\Users\TestUser\Desktop\projects") is True
 
     def test_unsafe_root_path(self) -> None:
         from aria.tools.mcp.pc_command_tools import _is_safe_path
@@ -203,19 +213,19 @@ class TestPathSafety:
 
     def test_unsafe_path_traversal(self) -> None:
         from aria.tools.mcp.pc_command_tools import _is_safe_path
-        assert _is_safe_path(r"C:\Users\${USER}\Desktop\..\..\System32") is False
+        assert _is_safe_path(r"C:\Users\TestUser\Desktop\..\..\..\System32") is False
 
     def test_unsafe_shell_metachar(self) -> None:
         from aria.tools.mcp.pc_command_tools import _is_safe_path
-        assert _is_safe_path(r"C:\Users\${USER}\Desktop; rm -rf /") is False
+        assert _is_safe_path(r"C:\Users\TestUser\Desktop; rm -rf /") is False
 
     def test_unsafe_pipe(self) -> None:
         from aria.tools.mcp.pc_command_tools import _is_safe_path
-        assert _is_safe_path(r"C:\Users\${USER}\Desktop | cat /etc/passwd") is False
+        assert _is_safe_path(r"C:\Users\TestUser\Desktop | cat /etc/passwd") is False
 
     def test_unsafe_backtick(self) -> None:
         from aria.tools.mcp.pc_command_tools import _is_safe_path
-        assert _is_safe_path(r"C:\Users\${USER}\Desktop`whoami`") is False
+        assert _is_safe_path(r"C:\Users\TestUser\Desktop`whoami`") is False
 
     def test_unsafe_empty(self) -> None:
         from aria.tools.mcp.pc_command_tools import _is_safe_path
@@ -223,7 +233,13 @@ class TestPathSafety:
 
     def test_downloads_path(self) -> None:
         from aria.tools.mcp.pc_command_tools import _is_safe_path
-        assert _is_safe_path(r"C:\Users\${USER}\Downloads") is True
+        assert _is_safe_path(r"C:\Users\TestUser\Downloads") is True
+
+    def test_no_allowed_paths_blocks_all(self) -> None:
+        """ALLOWED_FILE_PATHS가 비어있으면 모든 경로 차단"""
+        with patch("aria.tools.mcp.pc_command_tools.ALLOWED_FILE_PATHS", []):
+            from aria.tools.mcp.pc_command_tools import _is_safe_path
+            assert _is_safe_path(r"C:\Users\TestUser\Desktop") is False
 
 
 class TestWSLPath:
@@ -231,7 +247,7 @@ class TestWSLPath:
 
     def test_c_drive(self) -> None:
         from aria.tools.mcp.pc_command_tools import _wsl_path
-        assert _wsl_path(r"C:\Users\${USER}\Desktop") == "/mnt/c/Users/${USER}/Desktop"
+        assert _wsl_path(r"C:\Users\TestUser\Desktop") == "/mnt/c/Users/TestUser/Desktop"
 
     def test_d_drive(self) -> None:
         from aria.tools.mcp.pc_command_tools import _wsl_path
@@ -286,6 +302,7 @@ class TestPCOpenAppTool:
         assert "http" in result.error
 
 
+@patch("aria.tools.mcp.pc_command_tools.ALLOWED_FILE_PATHS", _TEST_ALLOWED_PATHS)
 class TestPCFileListTool:
     """PCFileListTool 단위 테스트"""
 
@@ -315,7 +332,7 @@ class TestPCFileListTool:
         from aria.tools.mcp.pc_command_tools import PCFileListTool
         tool = PCFileListTool()
         result = await tool.execute({
-            "path": r"C:\Users\${USER}\Desktop",
+            "path": r"C:\Users\TestUser\Desktop",
             "pattern": "; rm -rf /",
         })
         assert result.success is False
@@ -547,3 +564,18 @@ class TestSubprocessSecurity:
             assert cmd[0] == "powershell.exe", f"{name}: {cmd[0]}"
             # -Command 플래그 사용
             assert cmd[1] == "-Command", f"{name}: {cmd[1]}"
+
+    def test_env_based_allowed_paths(self) -> None:
+        """ALLOWED_FILE_PATHS가 환경변수 기반인지 확인"""
+        from aria.tools.mcp.pc_command_tools import _load_allowed_file_paths
+        with patch.dict(os.environ, {"ARIA_ALLOWED_FILE_PATHS": r"C:\Test1,C:\Test2"}, clear=False):
+            paths = _load_allowed_file_paths()
+            assert paths == [r"C:\Test1", r"C:\Test2"]
+
+    def test_empty_env_returns_empty_list(self) -> None:
+        """환경변수 미설정 시 빈 리스트"""
+        from aria.tools.mcp.pc_command_tools import _load_allowed_file_paths
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ARIA_ALLOWED_FILE_PATHS", None)
+            paths = _load_allowed_file_paths()
+            assert paths == []

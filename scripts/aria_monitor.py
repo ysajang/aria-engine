@@ -17,7 +17,7 @@
     ARIA_MONITOR_LOG_PATHS  로그 파일 경로 (쉼표 구분)
     ARIA_MONITOR_CHECK_PORTS  스캔 포트 (쉼표 구분 / 기본: 22,80,443,8100)
 
-crontab 예시:
+crontab 예시 ($ARIA_HOME = ARIA Engine 프로젝트 루트):
     # 헬스체크 — 5분마다
     */5  * * * * $ARIA_HOME/.venv/bin/python $ARIA_HOME/scripts/aria_monitor.py --check health >> /tmp/aria-monitor.log 2>&1
 

@@ -67,13 +67,21 @@ APP_WHITELIST: dict[str, list[str]] = {
     "slack": ["cmd.exe", "/c", "start", "slack"],
 }
 
-# 파일 접근 허용 경로 (Windows 경로)
-ALLOWED_FILE_PATHS: list[str] = [
-    r"C:\Users\${USER}\Desktop",
-    r"C:\Users\${USER}\Documents",
-    r"C:\Users\${USER}\Downloads",
-    r"C:\Users\${USER}\Projects",
-]
+
+def _load_allowed_file_paths() -> list[str]:
+    """환경변수에서 허용 경로 목록 로드
+
+    ARIA_ALLOWED_FILE_PATHS: 쉼표(,) 구분 Windows 경로 목록
+    예: C:\\Users\\John\\Desktop,C:\\Users\\John\\Documents
+    """
+    raw = os.environ.get("ARIA_ALLOWED_FILE_PATHS", "")
+    if not raw.strip():
+        return []
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+# 파일 접근 허용 경로 (환경변수 기반)
+ALLOWED_FILE_PATHS: list[str] = _load_allowed_file_paths()
 
 # 시스템 정보 허용 명령어
 SYSTEM_INFO_COMMANDS: dict[str, list[str]] = {
@@ -100,6 +108,10 @@ def _is_safe_path(path: str) -> bool:
     - path traversal (..) 차단
     - 셸 메타문자 차단
     """
+    # 허용 경로 미설정 시 모든 접근 차단
+    if not ALLOWED_FILE_PATHS:
+        return False
+
     # path traversal 차단
     if ".." in path:
         return False
@@ -122,7 +134,7 @@ def _is_safe_path(path: str) -> bool:
 def _wsl_path(win_path: str) -> str:
     """Windows 경로 → WSL 경로 변환
 
-    C:\\Users\\${USER}\\Desktop → /mnt/c/Users/${USER}/Desktop
+    예: C:\\Users\\User\\Desktop → /mnt/c/Users/User/Desktop
     """
     # 이미 WSL 경로면 그대로 반환
     if win_path.startswith("/"):
@@ -185,7 +197,7 @@ async def _run_subprocess(
 class PCOpenAppTool(ToolExecutor):
     """PC 앱 열기 (whitelist 기반)
 
-    승재가 텔레그램에서 "크롬 열어" → HITL 확인 → cmd.exe /c start chrome
+    텔레그램에서 "크롬 열어" → HITL 확인 → cmd.exe /c start chrome
     등록되지 않은 프로그램은 차단됨
     """
 
@@ -284,7 +296,7 @@ class PCFileListTool(ToolExecutor):
     """
 
     def get_definition(self) -> ToolDefinition:
-        paths = ", ".join(ALLOWED_FILE_PATHS)
+        paths = ", ".join(ALLOWED_FILE_PATHS) if ALLOWED_FILE_PATHS else "(ARIA_ALLOWED_FILE_PATHS 미설정)"
         return ToolDefinition(
             name="pc_file_list",
             description=(
@@ -295,7 +307,7 @@ class PCFileListTool(ToolExecutor):
                 ToolParameter(
                     name="path",
                     type="string",
-                    description="조회할 Windows 경로 (예: C:\\Users\\${USER}\\Desktop)",
+                    description="조회할 Windows 경로",
                     required=True,
                 ),
                 ToolParameter(
@@ -324,7 +336,7 @@ class PCFileListTool(ToolExecutor):
 
         # 경로 안전성 검증
         if not _is_safe_path(path):
-            allowed = ", ".join(ALLOWED_FILE_PATHS)
+            allowed = ", ".join(ALLOWED_FILE_PATHS) if ALLOWED_FILE_PATHS else "(미설정)"
             return ToolResult(
                 tool_name="pc_file_list",
                 success=False,
