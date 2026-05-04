@@ -39,6 +39,8 @@ class AlertType(str, Enum):
     TRAFFIC_ANOMALY = "traffic_anomaly"             # 트래픽 이상 감지
     SECURITY_ISSUE = "security_issue"               # 보안 취약점 발견
     ERROR_SPIKE = "error_spike"                     # 에러 로그 급증
+    # --- SEO 모니터링 (Phase 3.5) ---
+    SEO_ISSUE = "seo_issue"                           # SEO 이슈 발견
 
 
 # 알림별 텔레그램 이모지 매핑
@@ -54,6 +56,7 @@ ALERT_EMOJI: dict[AlertType, str] = {
     AlertType.TRAFFIC_ANOMALY: "📈",
     AlertType.SECURITY_ISSUE: "🛡️",
     AlertType.ERROR_SPIKE: "📊",
+    AlertType.SEO_ISSUE: "🔍",
 }
 
 # 알림별 기본 쿨다운 (초)
@@ -69,6 +72,7 @@ DEFAULT_COOLDOWNS: dict[AlertType, int] = {
     AlertType.TRAFFIC_ANOMALY: 900,     # 15분 (cron 15분 주기와 동일)
     AlertType.SECURITY_ISSUE: 86400,    # 24시간 (cron 1일 1회)
     AlertType.ERROR_SPIKE: 1800,        # 30분 (cron 30분 주기와 동일)
+    AlertType.SEO_ISSUE: 86400,         # 24시간 (cron 1일 1회)
 }
 
 

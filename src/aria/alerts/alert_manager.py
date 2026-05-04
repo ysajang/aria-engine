@@ -464,6 +464,52 @@ class AlertManager:
         )
         return await self._send_alert(alert)
 
+    async def check_seo_issue(
+        self,
+        url: str,
+        total_issues: int,
+        high_issues: int,
+        meta_score: int = 0,
+        meta_max_score: int = 7,
+        broken_links: int = 0,
+        top_issues: list[dict] | None = None,
+    ) -> Alert | None:
+        """SEO 이슈 알림 (Phase 3.5)"""
+        if not self.enabled:
+            return None
+
+        # high 이슈가 있거나 메타 점수가 절반 미만이면 알림
+        if high_issues == 0 and meta_score >= meta_max_score // 2:
+            return None
+
+        level = AlertLevel.CRITICAL if high_issues >= 3 else AlertLevel.WARNING
+
+        issue_detail = ""
+        if top_issues:
+            issue_detail = "\n주요 이슈:\n" + "\n".join(
+                f"  [{i.get('severity', '?')}] {i.get('message', '')[:80]}"
+                for i in top_issues[:5]
+            )
+
+        alert = Alert(
+            alert_type=AlertType.SEO_ISSUE,
+            level=level,
+            title=f"SEO 이슈 — {total_issues}건 ({high_issues}건 심각)",
+            message=(
+                f"URL: {url}\n"
+                f"메타태그: {meta_score}/{meta_max_score}\n"
+                f"깨진 링크: {broken_links}개{issue_detail}"
+            ),
+            data={
+                "url": url,
+                "total_issues": total_issues,
+                "high_issues": high_issues,
+                "meta_score": meta_score,
+                "broken_links": broken_links,
+            },
+        )
+        return await self._send_alert(alert)
+
     # === Internal ===
 
     def _is_in_cooldown(self, alert_type: AlertType) -> bool:

@@ -276,6 +276,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         tool_registry.register_executor(ServerTrafficTool())
         tool_registry.register_executor(ServerSecurityScanTool())
         logger.info("monitoring_tools_registered", tools=4)
+
+        # SEO 모니터링 도구 (Product Connector Phase 3.5)
+        from aria.tools.mcp.seo_monitor_tools import SeoAuditTool
+        tool_registry.register_executor(SeoAuditTool())
+        logger.info("seo_monitor_tool_registered", tools=1)
     else:
         logger.info("monitoring_tools_skipped", reason="ARIA_MONITOR_ENABLED=false")
 
@@ -1252,6 +1257,24 @@ async def _evaluate_monitoring_event(event: Any) -> None:
                     headers_score=data.get("headers_score", 0),
                     headers_max_score=data.get("headers_max_score", 0),
                     issues=issues,
+                )
+
+        elif et == "seo_audit":
+            total_issues = data.get("total_issues", 0)
+            high_issues = data.get("high_issues", 0)
+            if total_issues > 0:
+                seo_url = data.get("url", "unknown")
+                if product_label:
+                    seo_url = f"[{product_label}] {seo_url}"
+                meta = data.get("meta", {})
+                await alert_manager.check_seo_issue(
+                    url=seo_url,
+                    total_issues=total_issues,
+                    high_issues=high_issues,
+                    meta_score=meta.get("score", 0),
+                    meta_max_score=meta.get("max_score", 7),
+                    broken_links=data.get("links", {}).get("broken", 0),
+                    top_issues=data.get("all_issues", [])[:5],
                 )
 
     except Exception as e:
