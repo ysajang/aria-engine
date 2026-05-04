@@ -558,6 +558,53 @@ class AlertManager:
         )
         return await self._send_alert(alert)
 
+        return await self._send_alert(alert)
+
+    async def check_dependency_vuln(
+        self,
+        repo_label: str,
+        total_alerts: int,
+        critical: int = 0,
+        high: int = 0,
+        medium: int = 0,
+        top_alerts: list[dict] | None = None,
+    ) -> Alert | None:
+        """의존성 취약점 알림 (Phase 3.5)"""
+        if not self.enabled:
+            return None
+
+        # critical 또는 high가 있을 때만 알림
+        if critical == 0 and high == 0:
+            return None
+
+        level = AlertLevel.CRITICAL if critical > 0 else AlertLevel.WARNING
+
+        detail = ""
+        if top_alerts:
+            detail = "\n주요 취약점:\n" + "\n".join(
+                f"  [{a.get('severity', '?').upper()}] {a.get('package', '?')}: "
+                f"{a.get('summary', '')[:80]}"
+                for a in top_alerts[:5]
+            )
+
+        alert = Alert(
+            alert_type=AlertType.DEPENDENCY_VULN,
+            level=level,
+            title=f"의존성 취약점 — {total_alerts}건",
+            message=(
+                f"레포: {repo_label}\n"
+                f"🔴 Critical: {critical} / 🟠 High: {high} / 🟡 Medium: {medium}"
+                f"{detail}"
+            ),
+            data={
+                "repo": repo_label,
+                "total": total_alerts,
+                "critical": critical,
+                "high": high,
+            },
+        )
+        return await self._send_alert(alert)
+
     # === Internal ===
 
     def _is_in_cooldown(self, alert_type: AlertType) -> bool:

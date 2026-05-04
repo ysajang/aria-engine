@@ -286,6 +286,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from aria.tools.mcp.db_monitor_tools import DbAuditTool
         tool_registry.register_executor(DbAuditTool())
         logger.info("db_monitor_tool_registered", tools=1)
+
+        # 의존성 감사 도구 (Product Connector Phase 3.5)
+        from aria.tools.mcp.dep_audit_tools import DependencyAuditTool
+        tool_registry.register_executor(DependencyAuditTool())
+        logger.info("dep_audit_tool_registered", tools=1)
     else:
         logger.info("monitoring_tools_skipped", reason="ARIA_MONITOR_ENABLED=false")
 
@@ -1302,6 +1307,26 @@ async def _evaluate_monitoring_event(event: Any) -> None:
                     slow_query_count=slow.get("total_found", 0),
                     unprotected_tables=len(rls.get("unprotected_tables", [])),
                     top_issues=data.get("all_issues", [])[:5],
+                )
+
+        elif et == "dependency_audit":
+            critical = data.get("critical", 0)
+            high = data.get("high", 0)
+            if critical > 0 or high > 0:
+                repo_label = "unknown"
+                repos = data.get("repos", [])
+                if repos:
+                    names = [f"{r.get('owner', '?')}/{r.get('repo', '?')}" for r in repos]
+                    repo_label = ", ".join(names)
+                if product_label:
+                    repo_label = f"[{product_label}] {repo_label}"
+                await alert_manager.check_dependency_vuln(
+                    repo_label=repo_label,
+                    total_alerts=data.get("total_alerts", 0),
+                    critical=critical,
+                    high=high,
+                    medium=data.get("medium", 0),
+                    top_alerts=data.get("all_issues", [])[:5],
                 )
 
     except Exception as e:
