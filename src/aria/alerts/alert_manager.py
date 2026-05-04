@@ -510,6 +510,54 @@ class AlertManager:
         )
         return await self._send_alert(alert)
 
+        return await self._send_alert(alert)
+
+    async def check_db_issue(
+        self,
+        project_ref: str,
+        total_issues: int,
+        high_issues: int,
+        db_size: str = "unknown",
+        active_connections: int = 0,
+        max_connections: int = 0,
+        slow_query_count: int = 0,
+        unprotected_tables: int = 0,
+        top_issues: list[dict] | None = None,
+    ) -> Alert | None:
+        """DB 이슈 알림 (Phase 3.5)"""
+        if not self.enabled:
+            return None
+
+        if high_issues == 0:
+            return None
+
+        level = AlertLevel.CRITICAL if high_issues >= 3 else AlertLevel.WARNING
+
+        issue_detail = ""
+        if top_issues:
+            issue_detail = "\n주요 이슈:\n" + "\n".join(
+                f"  [{i.get('severity', '?')}] {i.get('message', '')[:80]}"
+                for i in top_issues[:5]
+            )
+
+        alert = Alert(
+            alert_type=AlertType.DB_ISSUE,
+            level=level,
+            title=f"DB 이슈 — {total_issues}건 ({high_issues}건 심각)",
+            message=(
+                f"프로젝트: {project_ref}\n"
+                f"사이즈: {db_size} / 커넥션: {active_connections}/{max_connections}\n"
+                f"슬로우 쿼리: {slow_query_count}개 / RLS 미적용: {unprotected_tables}개"
+                f"{issue_detail}"
+            ),
+            data={
+                "project_ref": project_ref,
+                "total_issues": total_issues,
+                "high_issues": high_issues,
+            },
+        )
+        return await self._send_alert(alert)
+
     # === Internal ===
 
     def _is_in_cooldown(self, alert_type: AlertType) -> bool:

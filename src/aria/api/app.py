@@ -281,6 +281,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from aria.tools.mcp.seo_monitor_tools import SeoAuditTool
         tool_registry.register_executor(SeoAuditTool())
         logger.info("seo_monitor_tool_registered", tools=1)
+
+        # DB 모니터링 도구 (Product Connector Phase 3.5)
+        from aria.tools.mcp.db_monitor_tools import DbAuditTool
+        tool_registry.register_executor(DbAuditTool())
+        logger.info("db_monitor_tool_registered", tools=1)
     else:
         logger.info("monitoring_tools_skipped", reason="ARIA_MONITOR_ENABLED=false")
 
@@ -1274,6 +1279,28 @@ async def _evaluate_monitoring_event(event: Any) -> None:
                     meta_score=meta.get("score", 0),
                     meta_max_score=meta.get("max_score", 7),
                     broken_links=data.get("links", {}).get("broken", 0),
+                    top_issues=data.get("all_issues", [])[:5],
+                )
+
+        elif et == "db_audit":
+            total_issues = data.get("total_issues", 0)
+            high_issues = data.get("high_issues", 0)
+            if high_issues > 0:
+                health = data.get("health", {})
+                slow = data.get("slow_queries", {})
+                rls = data.get("rls", {})
+                db_label = data.get("project_ref", "unknown")
+                if product_label:
+                    db_label = f"[{product_label}] {db_label}"
+                await alert_manager.check_db_issue(
+                    project_ref=db_label,
+                    total_issues=total_issues,
+                    high_issues=high_issues,
+                    db_size=health.get("db_size", "unknown"),
+                    active_connections=health.get("active_connections", 0),
+                    max_connections=health.get("max_connections", 0),
+                    slow_query_count=slow.get("total_found", 0),
+                    unprotected_tables=len(rls.get("unprotected_tables", [])),
                     top_issues=data.get("all_issues", [])[:5],
                 )
 
