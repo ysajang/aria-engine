@@ -26,6 +26,7 @@ from aria.learning.types import (
 from aria.learning.base import BaseLearner
 from aria.learning.conversation_learner import ConversationLearner
 from aria.learning.feedback_loop import FeedbackLoop
+from aria.learning.tool_optimizer import ToolOptimizer
 
 __all__ = [
     "BaseLearner",
@@ -40,4 +41,5 @@ __all__ = [
     "Preference",
     "PreferenceCategory",
     "ToolMetrics",
+    "ToolOptimizer",
 ]
