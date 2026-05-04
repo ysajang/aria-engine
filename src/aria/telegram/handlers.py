@@ -31,6 +31,7 @@ class ARIAHandlers:
         allowed_chat_id: 허용된 채팅 ID (승재 전용)
         default_scope: 기본 메모리 스코프
         default_collection: 기본 검색 컬렉션
+        transcriber: Whisper STT 인스턴스 (None이면 음성 비활성화)
     """
 
     def __init__(
@@ -39,11 +40,13 @@ class ARIAHandlers:
         allowed_chat_id: str,
         default_scope: str = "global",
         default_collection: str = "default",
+        transcriber: Any | None = None,
     ) -> None:
         self.client = aria_client
         self.allowed_chat_id = allowed_chat_id
         self.default_scope = default_scope
         self.default_collection = default_collection
+        self._transcriber = transcriber
 
     def _is_authorized(self, update: Update) -> bool:
         """채팅 ID 기반 인증"""
@@ -261,6 +264,116 @@ class ARIAHandlers:
                 await update.message.reply_text("⚠️ 응답 전송 중 오류가 발생했습니다.")
 
     # === HITL 콜백 핸들러 ===
+
+    async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """음성 메시지 → Whisper STT → ARIA 질의
+
+        텔레그램 음성 메시지(OGG/Opus) 수신 → faster-whisper 로컬 변환 → 텍스트로 ARIA 호출
+        """
+        if not self._is_authorized(update):
+            return
+        if not update.message or not update.message.voice:
+            return
+
+        voice = update.message.voice
+
+        # 1분 이상 음성은 비용/처리시간 고려해서 거부
+        if voice.duration and voice.duration > 60:
+            await update.message.reply_text("⚠️ 1분 이하 음성만 지원합니다.")
+            return
+
+        # STT 준비 확인
+        if self._transcriber is None:
+            await update.message.reply_text("⚠️ 음성 인식(STT) 기능이 비활성화되어 있습니다.")
+            return
+
+        # "변환 중" 표시
+        processing_msg = await update.message.reply_text("🎙️ 음성 인식 중...")
+
+        try:
+            # 텔레그램에서 음성 파일 다운로드
+            voice_file = await voice.get_file()
+            audio_bytes = await voice_file.download_as_bytearray()
+
+            if not audio_bytes:
+                await processing_msg.edit_text("❌ 음성 파일 다운로드 실패")
+                return
+
+            # faster-whisper 로컬 변환
+            result = await self._transcriber.transcribe_bytes(bytes(audio_bytes), suffix=".ogg")
+
+            if not result.text:
+                await processing_msg.edit_text("❌ 음성을 인식하지 못했습니다. 다시 시도해주세요.")
+                return
+
+            # 변환 결과 안내
+            lang_info = f" ({result.language})" if result.language else ""
+            stt_info = (
+                f"🎙️ 인식 결과{lang_info}: \"{result.text}\"\n"
+                f"⏱️ 처리: {result.processing_ms:.0f}ms\n\n"
+                "🤔 ARIA 처리 중..."
+            )
+            await processing_msg.edit_text(stt_info)
+
+        except Exception as e:
+            logger.error("voice_stt_failed", error=str(e)[:300])
+            await processing_msg.edit_text(f"❌ 음성 인식 실패: {str(e)[:200]}")
+            return
+
+        # STT 텍스트로 ARIA 질의 (기존 handle_message 로직 재활용)
+        text = result.text.strip()
+
+        # 스코프 지정 (@testorum 등)
+        scope = self.default_scope
+        if text.startswith("@"):
+            parts = text.split(" ", 1)
+            if len(parts) == 2:
+                scope = parts[0][1:]
+                text = parts[1].strip()
+
+        # ARIA API 호출
+        data = await self.client.query(
+            text,
+            scope=scope,
+            collection=self.default_collection,
+        )
+
+        # "처리 중" 메시지 삭제
+        try:
+            await processing_msg.delete()
+        except Exception:
+            pass
+
+        if "error" in data:
+            await update.message.reply_text(f"❌ {data['message']}")
+            return
+
+        # 응답 포맷
+        answer = data.get("answer") or "응답을 생성하지 못했습니다."
+        tool_calls = data.get("tool_calls_made", 0)
+        confidence = data.get("confidence", 0)
+
+        meta_parts: list[str] = [f"🎙️\"{result.text}\""]
+        if tool_calls > 0:
+            meta_parts.append(f"🔧{tool_calls}")
+        if confidence > 0:
+            meta_parts.append(f"📊{confidence:.0%}")
+        meta = " ".join(meta_parts)
+
+        response_text = answer
+        if meta:
+            response_text += f"\n\n_{meta}_"
+
+        try:
+            await update.message.reply_text(response_text, parse_mode="Markdown")
+        except Exception:
+            try:
+                await update.message.reply_text(answer)
+            except Exception as send_err:
+                logger.error("telegram_send_failed", error=str(send_err)[:200])
+                await update.message.reply_text("⚠️ 응답 전송 중 오류가 발생했습니다.")
+
+    # === HITL 콜백 핸들러 (원래 위치) ===
 
     async def handle_confirmation_callback(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE,

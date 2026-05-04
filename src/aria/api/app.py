@@ -259,6 +259,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("monitoring_tools_skipped", reason="ARIA_MONITOR_ENABLED=false")
 
+    # PC Command Tools — WSL Interop 기반 PC 제어 (기본 활성화)
+    if config.pc_command.is_configured:
+        from aria.tools.mcp.pc_command_tools import (
+            PCOpenAppTool,
+            PCFileListTool,
+            PCSystemInfoTool,
+            PCCloseAppTool,
+        )
+        tool_registry.register_executor(PCOpenAppTool())
+        tool_registry.register_executor(PCFileListTool())
+        tool_registry.register_executor(PCSystemInfoTool())
+        tool_registry.register_executor(PCCloseAppTool())
+        logger.info("pc_command_tools_registered", tools=4)
+    else:
+        logger.info("pc_command_tools_skipped", reason="ARIA_PC_ENABLED=false")
+
     # MCP Client — Google Workspace MCP 서버 연동 (OAuth2 필수)
     mcp_clients: list = []
     if config.mcp.is_configured and config.google_oauth.is_configured:

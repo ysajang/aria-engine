@@ -333,6 +333,52 @@ class MonitoringConfig(BaseSettings):
             return [22, 80, 443, 8100]
 
 
+class STTConfig(BaseSettings):
+    """음성 인식 (STT) 설정 — faster-whisper 로컬 실행
+
+    환경변수 prefix: ARIA_STT_
+    """
+
+    model_config = SettingsConfigDict(env_prefix="ARIA_STT_", env_file=_get_env_file(), extra="ignore")
+
+    enabled: bool = Field(default=True, description="STT 기능 활성화")
+    model_size: str = Field(
+        default="medium",
+        description="Whisper 모델 크기 (tiny / base / small / medium / large-v3)",
+    )
+    device: str = Field(default="cpu", description="실행 장치 (cpu / cuda / auto)")
+    compute_type: str = Field(default="int8", description="양자화 타입 (int8 / float16 / float32)")
+    language: str = Field(default="", description="강제 언어 (빈 문자열이면 자동 감지)")
+    beam_size: int = Field(default=5, ge=1, le=10, description="빔 서치 크기")
+
+    @property
+    def is_configured(self) -> bool:
+        """STT가 활성화되어 있는지"""
+        return self.enabled
+
+    @property
+    def language_or_none(self) -> str | None:
+        """빈 문자열이면 None 반환 (자동 감지)"""
+        return self.language if self.language else None
+
+
+class PCCommandConfig(BaseSettings):
+    """PC 원격 제어 설정
+
+    환경변수 prefix: ARIA_PC_
+    """
+
+    model_config = SettingsConfigDict(env_prefix="ARIA_PC_", env_file=_get_env_file(), extra="ignore")
+
+    enabled: bool = Field(default=True, description="PC 제어 기능 활성화")
+    subprocess_timeout: int = Field(default=15, ge=5, le=60, description="subprocess 실행 타임아웃 (초)")
+
+    @property
+    def is_configured(self) -> bool:
+        """PC 제어가 활성화되어 있는지"""
+        return self.enabled
+
+
 class MCPConfig(BaseSettings):
     """MCP (Model Context Protocol) 클라이언트 설정
 
@@ -386,6 +432,8 @@ class AriaConfig(BaseSettings):
     google_maps: GoogleMapsConfig = Field(default_factory=GoogleMapsConfig)
     google_oauth: GoogleOAuthConfig = Field(default_factory=GoogleOAuthConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
+    stt: STTConfig = Field(default_factory=STTConfig)
+    pc_command: PCCommandConfig = Field(default_factory=PCCommandConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     event: EventConfig = Field(default_factory=EventConfig)
     alert: AlertConfig = Field(default_factory=AlertConfig)

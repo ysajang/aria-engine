@@ -75,7 +75,7 @@ INTENT_ANALYSIS_SYSTEM = """당신은 사용자 의도 분석 전문가입니다
     "required_knowledge": ["필요한 지식 영역 목록"],
     "search_queries": ["벡터DB 검색에 사용할 쿼리 목록 (최대 3개)"],
     "complexity": "simple|moderate|complex",
-    "recommended_action": "search_knowledge|reason|respond|clarify"
+    "recommended_action": "search_knowledge|reason|respond|clarify|pc_command"
 }}
 
 complexity 판단 기준:
@@ -91,12 +91,21 @@ recommended_action 판단 기준:
   * 웹 검색이 필요한 최신 정보
   * 특정 서비스/상품 검색
   * "찾아줘", "검색해줘", "알려줘" + 구체적 대상
+- pc_command: 다음 유형의 요청은 반드시 pc_command로 분류하세요:
+  * PC 프로그램 열기/실행 (크롬 열어, VSCode 실행, 메모장 켜줘 등)
+  * PC 프로그램 종료 (크롬 닫아, 노트패드 종료 등)
+  * PC 파일/폴더 확인 (바탕화면 파일 보여줘, 다운로드 폴더 뭐 있어 등)
+  * PC 시스템 정보 (프로세스 목록, 디스크 용량, 배터리 등)
+  * "열어", "실행", "켜줘", "닫아", "종료" + PC 프로그램 이름
 - reason: 벡터DB 검색 없이 추론만으로 답변 가능한 전문 질문
 - respond: 인사, 잡담 등 외부 정보 없이 즉시 응답 가능한 대화
 - clarify: 질문이 모호하여 추가 정보가 필요한 경우
 
 중요: "~찾아줘", "~검색해줘", "~어디", "근처", "주변" 등 위치/검색 키워드가 포함된 질문은
 절대 simple/respond로 분류하지 마세요. 반드시 moderate/search_knowledge로 분류하세요.
+
+중요: "~열어", "~실행", "~켜줘", "~닫아", "~종료" + PC/앱 관련 키워드가 포함된 요청은
+절대 simple/respond로 분류하지 마세요. 반드시 moderate/pc_command로 분류하세요.
 
 반드시 위 JSON 형식으로만 응답하세요. 다른 텍스트를 추가하지 마세요."""
 
@@ -453,6 +462,10 @@ class ReActAgent:
         # Fast path: 간단한 인사/잡담은 즉시 응답 (LLM 1회)
         if complexity == "simple" and action in ("respond", "clarify"):
             return "fast_respond"
+
+        # PC 명령은 검색 불필요 → 바로 추론 (도구 호출)
+        if action == "pc_command":
+            return "reason"
 
         if action in ("respond", "clarify"):
             return "reason"  # 검색 스킵 / 추론은 반드시 수행

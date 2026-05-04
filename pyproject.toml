@@ -46,6 +46,9 @@ dependencies = [
 
     # === Telegram Bot ===
     "python-telegram-bot>=21.0",
+
+    # === Speech-to-Text (local / CPU / free) ===
+    "faster-whisper>=1.1.0",
 ]
 
 [project.optional-dependencies]
