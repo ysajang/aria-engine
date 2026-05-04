@@ -27,6 +27,7 @@ from aria.learning.base import BaseLearner
 from aria.learning.conversation_learner import ConversationLearner
 from aria.learning.feedback_loop import FeedbackLoop
 from aria.learning.tool_optimizer import ToolOptimizer
+from aria.learning.prompt_improver import PromptImprover
 
 __all__ = [
     "BaseLearner",
@@ -40,6 +41,7 @@ __all__ = [
     "PatternType",
     "Preference",
     "PreferenceCategory",
+    "PromptImprover",
     "ToolMetrics",
     "ToolOptimizer",
 ]
