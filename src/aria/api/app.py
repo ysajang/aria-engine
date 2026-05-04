@@ -14,6 +14,11 @@ REST API 엔드포인트
 - POST /v1/events → 이벤트 수집 (배치)
 - GET /v1/events → 이벤트 조회 (필터링)
 - GET /v1/events/stats → 이벤트 통계
+- POST /v1/products → 제품 등록
+- GET /v1/products → 제품 목록
+- GET /v1/products/{product_id} → 제품 상세
+- PATCH /v1/products/{product_id} → 제품 수정
+- DELETE /v1/products/{product_id} → 제품 해제
 - 글로벌 에러 핸들러 → 구조화된 에러 응답
 - Rate limiting → 요청 제한
 """
@@ -72,6 +77,17 @@ from aria.events.event_store import EventStore
 from aria.events.types import EventIngestRequest, EventIngestResponse, EventQuery
 from aria.alerts.alert_manager import AlertManager
 from aria.learning.manager import LearningManager
+from aria.products.registry import (
+    ProductRegistry,
+    ProductAlreadyExistsError,
+    ProductNotFoundError,
+    ProductRegistryError,
+)
+from aria.products.types import (
+    ProductRegisterRequest,
+    ProductUpdateRequest,
+)
+from aria.events.types import register_event_source, unregister_event_source
 
 logger = structlog.get_logger()
 
@@ -85,6 +101,7 @@ tool_registry: ToolRegistry | None = None
 event_store: EventStore | None = None
 alert_manager: AlertManager | None = None
 learning_manager: LearningManager | None = None
+product_registry: ProductRegistry | None = None
 
 
 @asynccontextmanager
@@ -92,7 +109,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """애플리케이션 시작/종료 시 초기화"""
     global llm_provider, vector_store, react_agent, rate_limiter
     global index_manager, memory_loader, tool_registry, event_store, alert_manager
-    global learning_manager
+    global learning_manager, product_registry
 
     config = get_config()
 
@@ -388,6 +405,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         window_seconds=60,
     )
 
+    # Product Connector (Phase 3.5)
+    if config.product.is_configured:
+        product_registry = ProductRegistry(
+            base_path=config.product.registry_path,
+            memory_base_path=config.memory.base_path,
+        )
+        # 활성 제품의 이벤트 소스 동적 등록
+        for product in product_registry.list_active():
+            register_event_source(product.id)
+        logger.info(
+            "product_registry_initialized",
+            total=product_registry.product_count,
+            active=product_registry.active_count,
+        )
+    else:
+        logger.info("product_connector_disabled")
+
     # Self-Learning System (Phase 5)
     if config.learning.enabled:
         learning_manager = LearningManager(
@@ -412,6 +446,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         alerts_enabled=alert_manager.enabled,
         monitoring_enabled=config.monitoring.is_configured,
         learning_enabled=config.learning.enabled,
+        products_registered=product_registry.product_count if product_registry else 0,
+        products_active=product_registry.active_count if product_registry else 0,
     )
     yield
 
@@ -1104,11 +1140,51 @@ def _require_event_store() -> EventStore:
     return event_store
 
 
+def _resolve_product_label(data: dict) -> str | None:
+    """모니터링 데이터의 URL/경로에서 제품명 자동 해석
+
+    ProductRegistry에 등록된 제품의 URL과 매칭하여
+    알림 메시지에 "[Testorum]" 같은 제품 라벨 추가
+
+    Returns:
+        제품명 (매칭 시) / None (미매칭)
+    """
+    if product_registry is None:
+        return None
+
+    # URL 기반 매칭
+    url = data.get("url", "")
+    if url:
+        for product in product_registry.list_active():
+            for product_url in product.urls:
+                # 도메인 레벨 매칭 (https://testorum.app → testorum.app)
+                product_domain = product_url.split("//", 1)[-1].split("/", 1)[0]
+                if product_domain in url:
+                    return product.name
+
+    # log_path 기반 매칭
+    log_path = data.get("log_path", "")
+    if log_path:
+        for product in product_registry.list_active():
+            for p in product.log_paths:
+                if product.id in log_path or p == log_path:
+                    return product.name
+
+    # 명시적 product_id 필드
+    product_id = data.get("product_id")
+    if product_id and product_registry.has_product(product_id):
+        return product_registry.get(product_id).name
+
+    return None
+
+
 async def _evaluate_monitoring_event(event: Any) -> None:
     """모니터링 이벤트 수신 시 AlertManager 자동 평가
 
     cron 스크립트가 POST /v1/events로 보낸 모니터링 결과를
     AlertManager가 평가하여 필요 시 텔레그램 알림 발송
+
+    Product Connector 연동: URL → 제품명 자동 매핑
 
     지원 event_type:
     - health_check → check_health()
@@ -1123,9 +1199,15 @@ async def _evaluate_monitoring_event(event: Any) -> None:
         et = event.event_type
         data = event.data or {}
 
+        # Product Connector: URL/경로에서 제품명 자동 해석
+        product_label = _resolve_product_label(data)
+
         if et == "health_check":
+            url_display = data.get("url", "unknown")
+            if product_label:
+                url_display = f"[{product_label}] {url_display}"
             await alert_manager.check_health(
-                url=data.get("url", "unknown"),
+                url=url_display,
                 status=data.get("status", "unknown"),
                 status_code=data.get("status_code", 0),
                 response_time_ms=data.get("response_time_ms", 0),
@@ -1136,16 +1218,22 @@ async def _evaluate_monitoring_event(event: Any) -> None:
         elif et == "error_log_analysis":
             error_count = data.get("error_count", 0)
             if error_count >= 10:
+                log_display = data.get("log_path", "unknown")
+                if product_label:
+                    log_display = f"[{product_label}] {log_display}"
                 await alert_manager.check_error_spike(
-                    log_path=data.get("log_path", "unknown"),
+                    log_path=log_display,
                     error_count=error_count,
                     top_errors=data.get("top_error_messages"),
                 )
 
         elif et == "traffic_analysis":
             if data.get("anomaly_detected"):
+                traffic_display = data.get("log_path", "unknown")
+                if product_label:
+                    traffic_display = f"[{product_label}] {traffic_display}"
                 await alert_manager.check_traffic_anomaly(
-                    log_path=data.get("log_path", "unknown"),
+                    log_path=traffic_display,
                     current_rpm=data.get("current_rpm", 0),
                     baseline_rpm=data.get("baseline_rpm", 0),
                     ratio=data.get("ratio", 0),
@@ -1156,8 +1244,11 @@ async def _evaluate_monitoring_event(event: Any) -> None:
             issues = data.get("issues", [])
             high_issues = [i for i in issues if i.get("severity") == "high"]
             if high_issues:
+                sec_url = data.get("url", "unknown")
+                if product_label:
+                    sec_url = f"[{product_label}] {sec_url}"
                 await alert_manager.check_security_issue(
-                    url=data.get("url", "unknown"),
+                    url=sec_url,
                     headers_score=data.get("headers_score", 0),
                     headers_max_score=data.get("headers_max_score", 0),
                     issues=issues,
@@ -1321,3 +1412,198 @@ async def learning_stats() -> JSONResponse:
             content={"error": "SERVICE_UNAVAILABLE", "message": "Learning Manager 미초기화"},
         )
     return JSONResponse(content=learning_manager.get_stats())
+
+
+# === Product Connector Endpoints (Phase 3.5) ===
+
+
+def _require_product_registry() -> ProductRegistry:
+    """ProductRegistry 초기화 확인"""
+    if product_registry is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Product Connector 비활성화 (ARIA_PRODUCT_ENABLED=false)",
+        )
+    return product_registry
+
+
+@app.post(
+    "/v1/products",
+    summary="제품 등록",
+    dependencies=[Depends(verify_api_key)],
+)
+async def register_product(request: ProductRegisterRequest) -> JSONResponse:
+    """제품을 ARIA에 등록 — 자동 감시+분석+보고 시작
+
+    features 미지정 시 설정값 기반 자동 결정
+    메모리 스코프 자동 생성 / 이벤트 소스 동적 등록
+    """
+    registry = _require_product_registry()
+
+    try:
+        config = request.to_product_config()
+        result = registry.register(config)
+
+        # 이벤트 소스 동적 등록
+        register_event_source(result.id)
+
+        logger.info(
+            "product_registered_api",
+            product_id=result.id,
+            features=[f.value for f in result.get_active_features()],
+        )
+
+        return JSONResponse(
+            status_code=201,
+            content={
+                "status": "registered",
+                "product": result.model_dump(mode="json"),
+            },
+        )
+    except ProductAlreadyExistsError as e:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": "PRODUCT_ALREADY_EXISTS",
+                "message": str(e),
+                "product_id": e.product_id,
+            },
+        )
+    except (ValueError, ProductRegistryError) as e:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "PRODUCT_REGISTER_FAILED",
+                "message": str(e),
+            },
+        )
+
+
+@app.get(
+    "/v1/products",
+    summary="제품 목록",
+    dependencies=[Depends(verify_api_key)],
+)
+async def list_products() -> JSONResponse:
+    """등록된 전체 제품 목록 (요약)"""
+    registry = _require_product_registry()
+    summaries = registry.list_all()
+    return JSONResponse(content={
+        "products": [s.model_dump(mode="json") for s in summaries],
+        "total": len(summaries),
+        "active": registry.active_count,
+    })
+
+
+@app.get(
+    "/v1/products/{product_id}",
+    summary="제품 상세",
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_product(product_id: str) -> JSONResponse:
+    """특정 제품의 전체 설정 조회"""
+    registry = _require_product_registry()
+
+    try:
+        config = registry.get(product_id)
+        return JSONResponse(content={
+            "product": config.model_dump(mode="json"),
+        })
+    except ProductNotFoundError as e:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "PRODUCT_NOT_FOUND",
+                "message": str(e),
+                "product_id": e.product_id,
+            },
+        )
+
+
+@app.patch(
+    "/v1/products/{product_id}",
+    summary="제품 수정",
+    dependencies=[Depends(verify_api_key)],
+)
+async def update_product(product_id: str, request: ProductUpdateRequest) -> JSONResponse:
+    """제품 설정 부분 업데이트"""
+    registry = _require_product_registry()
+
+    try:
+        result = registry.update(product_id, request)
+
+        # 상태 변경 시 이벤트 소스 동기화
+        from aria.products.types import ProductStatus
+        if request.status is not None:
+            if ProductStatus(request.status) == ProductStatus.ACTIVE:
+                register_event_source(product_id)
+            else:
+                unregister_event_source(product_id)
+
+        logger.info(
+            "product_updated_api",
+            product_id=product_id,
+            updated_fields=list(request.model_dump(exclude_none=True).keys()),
+        )
+
+        return JSONResponse(content={
+            "status": "updated",
+            "product": result.model_dump(mode="json"),
+        })
+    except ProductNotFoundError as e:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "PRODUCT_NOT_FOUND",
+                "message": str(e),
+                "product_id": e.product_id,
+            },
+        )
+    except (ValueError, ProductRegistryError) as e:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "PRODUCT_UPDATE_FAILED",
+                "message": str(e),
+            },
+        )
+
+
+@app.delete(
+    "/v1/products/{product_id}",
+    summary="제품 해제",
+    dependencies=[Depends(verify_api_key)],
+)
+async def unregister_product(product_id: str) -> JSONResponse:
+    """제품 해제 (ARCHIVED 상태 전환 — 메모리 보존)
+
+    모니터링 중단 / 이벤트 소스 제거 / 메모리 데이터는 보존
+    영구 삭제가 필요하면 purge=true 쿼리 파라미터 사용
+    """
+    registry = _require_product_registry()
+
+    try:
+        result = registry.unregister(product_id)
+
+        # 이벤트 소스 제거
+        unregister_event_source(product_id)
+
+        logger.info(
+            "product_unregistered_api",
+            product_id=product_id,
+        )
+
+        return JSONResponse(content={
+            "status": "archived",
+            "product": result.model_dump(mode="json"),
+            "memory_preserved": True,
+        })
+    except ProductNotFoundError as e:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "PRODUCT_NOT_FOUND",
+                "message": str(e),
+                "product_id": e.product_id,
+            },
+        )
