@@ -605,6 +605,135 @@ class AlertManager:
         )
         return await self._send_alert(alert)
 
+    async def check_payment_refund_spike(
+        self,
+        provider: str,
+        product_label: str | None,
+        refund_rate: float,
+        total_charges: int,
+        total_refunds: int,
+        period_days: int = 7,
+    ) -> Alert | None:
+        """환불율 급증 알림 (Phase 3.5 Step 6)"""
+        if not self.enabled:
+            return None
+
+        if refund_rate < 5.0:
+            return None
+
+        level = AlertLevel.CRITICAL if refund_rate >= 10.0 else AlertLevel.WARNING
+        label = f"[{product_label}] " if product_label else ""
+
+        alert = Alert(
+            alert_type=AlertType.PAYMENT_REFUND_SPIKE,
+            level=level,
+            title=f"환불율 급증 — {label}{provider}",
+            message=(
+                f"환불율: {refund_rate:.1f}%\n"
+                f"환불: {total_refunds}건 / 전체: {total_charges}건\n"
+                f"기간: {period_days}일"
+            ),
+            data={
+                "provider": provider,
+                "refund_rate": refund_rate,
+                "total_refunds": total_refunds,
+                "total_charges": total_charges,
+            },
+        )
+        return await self._send_alert(alert)
+
+    async def check_payment_failure_rate(
+        self,
+        provider: str,
+        product_label: str | None,
+        failure_rate: float,
+        total_attempts: int,
+        total_failures: int,
+        top_reasons: list[dict] | None = None,
+        period_days: int = 7,
+    ) -> Alert | None:
+        """결제 실패율 알림 (Phase 3.5 Step 6)"""
+        if not self.enabled:
+            return None
+
+        if failure_rate < 3.0:
+            return None
+
+        level = AlertLevel.CRITICAL if failure_rate >= 8.0 else AlertLevel.WARNING
+        label = f"[{product_label}] " if product_label else ""
+
+        detail = ""
+        if top_reasons:
+            detail = "\n실패 원인:\n" + "\n".join(
+                f"  - {r.get('reason', '?')}: {r.get('count', 0)}건"
+                for r in top_reasons[:3]
+            )
+
+        alert = Alert(
+            alert_type=AlertType.PAYMENT_FAILURE_RATE,
+            level=level,
+            title=f"결제 실패율 높음 — {label}{provider}",
+            message=(
+                f"실패율: {failure_rate:.1f}%\n"
+                f"실패: {total_failures}건 / 시도: {total_attempts}건\n"
+                f"기간: {period_days}일"
+                f"{detail}"
+            ),
+            data={
+                "provider": provider,
+                "failure_rate": failure_rate,
+                "total_failures": total_failures,
+                "total_attempts": total_attempts,
+            },
+        )
+        return await self._send_alert(alert)
+
+    async def check_subscription_churn(
+        self,
+        provider: str,
+        product_label: str | None,
+        churn_rate: float,
+        active_subscriptions: int,
+        canceled_in_period: int,
+        top_reasons: list[dict] | None = None,
+        period_days: int = 30,
+    ) -> Alert | None:
+        """구독 이탈률 알림 (Phase 3.5 Step 6)"""
+        if not self.enabled:
+            return None
+
+        if churn_rate < 5.0:
+            return None
+
+        level = AlertLevel.CRITICAL if churn_rate >= 10.0 else AlertLevel.WARNING
+        label = f"[{product_label}] " if product_label else ""
+
+        detail = ""
+        if top_reasons:
+            detail = "\n취소 사유:\n" + "\n".join(
+                f"  - {r.get('reason', '?')}: {r.get('count', 0)}건"
+                for r in top_reasons[:3]
+            )
+
+        alert = Alert(
+            alert_type=AlertType.SUBSCRIPTION_CHURN,
+            level=level,
+            title=f"구독 이탈률 높음 — {label}{provider}",
+            message=(
+                f"이탈률: {churn_rate:.1f}%\n"
+                f"활성: {active_subscriptions}건 / 취소: {canceled_in_period}건\n"
+                f"기간: {period_days}일"
+                f"{detail}"
+            ),
+            data={
+                "provider": provider,
+                "churn_rate": churn_rate,
+                "active": active_subscriptions,
+                "canceled": canceled_in_period,
+            },
+        )
+        return await self._send_alert(alert)
+
     # === Internal ===
 
     def _is_in_cooldown(self, alert_type: AlertType) -> bool:

@@ -43,6 +43,10 @@ class AlertType(str, Enum):
     SEO_ISSUE = "seo_issue"                           # SEO 이슈 발견
     DB_ISSUE = "db_issue"                               # DB 이슈 발견
     DEPENDENCY_VULN = "dependency_vuln"                   # 의존성 취약점 발견
+    # --- 결제 이상 감지 (Phase 3.5 Step 6) ---
+    PAYMENT_REFUND_SPIKE = "payment_refund_spike"           # 환불율 급증
+    PAYMENT_FAILURE_RATE = "payment_failure_rate"             # 결제 실패율 높음
+    SUBSCRIPTION_CHURN = "subscription_churn"                 # 구독 이탈률 높음
 
 
 # 알림별 텔레그램 이모지 매핑
@@ -61,6 +65,9 @@ ALERT_EMOJI: dict[AlertType, str] = {
     AlertType.SEO_ISSUE: "🔍",
     AlertType.DB_ISSUE: "🗄️",
     AlertType.DEPENDENCY_VULN: "📦",
+    AlertType.PAYMENT_REFUND_SPIKE: "💸",
+    AlertType.PAYMENT_FAILURE_RATE: "❌",
+    AlertType.SUBSCRIPTION_CHURN: "📉",
 }
 
 # 알림별 기본 쿨다운 (초)
@@ -79,6 +86,9 @@ DEFAULT_COOLDOWNS: dict[AlertType, int] = {
     AlertType.SEO_ISSUE: 86400,         # 24시간 (cron 1일 1회)
     AlertType.DB_ISSUE: 3600,            # 1시간
     AlertType.DEPENDENCY_VULN: 86400,    # 24시간 (일 1회 스캔)
+    AlertType.PAYMENT_REFUND_SPIKE: 3600,  # 1시간
+    AlertType.PAYMENT_FAILURE_RATE: 1800,   # 30분
+    AlertType.SUBSCRIPTION_CHURN: 86400,    # 24시간 (변화 느림)
 }
 
 

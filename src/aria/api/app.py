@@ -291,6 +291,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from aria.tools.mcp.dep_audit_tools import DependencyAuditTool
         tool_registry.register_executor(DependencyAuditTool())
         logger.info("dep_audit_tool_registered", tools=1)
+
+        # 결제 이상 감지 도구 (Product Connector Phase 3.5 Step 6)
+        from aria.tools.mcp.payment_monitor_tools import PaymentAuditTool
+        tool_registry.register_executor(PaymentAuditTool())
+        logger.info("payment_audit_tool_registered", tools=1)
     else:
         logger.info("monitoring_tools_skipped", reason="ARIA_MONITOR_ENABLED=false")
 
@@ -1327,6 +1332,57 @@ async def _evaluate_monitoring_event(event: Any) -> None:
                     high=high,
                     medium=data.get("medium", 0),
                     top_alerts=data.get("all_issues", [])[:5],
+                )
+
+        elif et == "payment_audit":
+            refunds = data.get("refunds", {})
+            failures = data.get("failures", {})
+            churn = data.get("churn", {})
+            provider = data.get("provider", "unknown")
+
+            # 환불율 알림
+            refund_rate = refunds.get("refund_rate", 0)
+            if refund_rate >= 5.0:
+                total_charges = refunds.get(
+                    "total_charges",
+                    refunds.get("total_orders", refunds.get("total_payments", 0)),
+                )
+                total_refunds = refunds.get(
+                    "total_refunds", refunds.get("total_cancels", 0),
+                )
+                await alert_manager.check_payment_refund_spike(
+                    provider=provider,
+                    product_label=product_label,
+                    refund_rate=refund_rate,
+                    total_charges=total_charges,
+                    total_refunds=total_refunds,
+                    period_days=refunds.get("period_days", 7),
+                )
+
+            # 결제 실패율 알림
+            failure_rate = failures.get("failure_rate", 0)
+            if failure_rate >= 3.0:
+                await alert_manager.check_payment_failure_rate(
+                    provider=provider,
+                    product_label=product_label,
+                    failure_rate=failure_rate,
+                    total_attempts=failures.get("total_attempts", 0),
+                    total_failures=failures.get("total_failures", 0),
+                    top_reasons=failures.get("top_failure_reasons"),
+                    period_days=failures.get("period_days", 7),
+                )
+
+            # 구독 이탈률 알림
+            churn_rate = churn.get("churn_rate", 0)
+            if churn_rate >= 5.0:
+                await alert_manager.check_subscription_churn(
+                    provider=provider,
+                    product_label=product_label,
+                    churn_rate=churn_rate,
+                    active_subscriptions=churn.get("active_subscriptions", 0),
+                    canceled_in_period=churn.get("canceled_in_period", 0),
+                    top_reasons=churn.get("top_cancel_reasons"),
+                    period_days=churn.get("period_days", 30),
                 )
 
     except Exception as e:
