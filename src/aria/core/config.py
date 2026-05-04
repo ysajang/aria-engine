@@ -413,6 +413,75 @@ class MCPConfig(BaseSettings):
         return {s.strip().lower() for s in self.google_services.split(",") if s.strip().lower() in valid}
 
 
+class LearningConfig(BaseSettings):
+    """Self-Learning 시스템 설정 (Phase 5)"""
+
+    model_config = SettingsConfigDict(env_prefix="ARIA_LEARNING_", env_file=_get_env_file(), extra="ignore")
+
+    enabled: bool = Field(default=True, description="자기 학습 시스템 전체 활성화")
+    conversation_learning: bool = Field(default=True, description="축 1: 대화 학습 활성화")
+    feedback_loop: bool = Field(default=True, description="축 2: 피드백 루프 활성화")
+    tool_optimizer: bool = Field(default=True, description="축 3: 도구 사용 최적화 활성화")
+    prompt_improver: bool = Field(default=True, description="축 4: 프롬프트 자기 개선 활성화")
+    pattern_predictor: bool = Field(default=True, description="축 5: 행동 패턴 예측 활성화")
+
+    # 대화 학습 (축 1) 설정
+    preference_confidence_threshold: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="선호 감지 신뢰도 임계값 — 이 이상이면 메모리에 자동 upsert",
+    )
+    max_preferences_per_query: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="쿼리당 최대 감지 선호 수",
+    )
+
+    # 피드백 루프 (축 2) 설정
+    correction_memory_domain: str = Field(
+        default="correction-log",
+        description="교정 기록이 저장되는 메모리 도메인",
+    )
+
+    # 도구 최적화 (축 3) 설정
+    tool_metrics_window_days: int = Field(
+        default=7,
+        ge=1,
+        le=90,
+        description="도구 통계 집계 기간 (일)",
+    )
+    min_calls_for_priority: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description="우선순위 조정에 필요한 최소 호출 수",
+    )
+
+    # 프롬프트 개선 (축 4) 설정
+    low_confidence_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="저신뢰 쿼리 기준 confidence",
+    )
+
+    # 패턴 예측 (축 5) 설정
+    min_pattern_occurrences: int = Field(
+        default=3,
+        ge=2,
+        le=20,
+        description="패턴으로 인정하기 위한 최소 발생 횟수",
+    )
+    pattern_confidence_threshold: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description="패턴 활성화 신뢰도 임계값",
+    )
+
+
 class AriaConfig(BaseSettings):
     """ARIA 통합 설정"""
 
@@ -437,6 +506,7 @@ class AriaConfig(BaseSettings):
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     event: EventConfig = Field(default_factory=EventConfig)
     alert: AlertConfig = Field(default_factory=AlertConfig)
+    learning: LearningConfig = Field(default_factory=LearningConfig)
 
     # Provider API Keys (LiteLLM이 자동 참조)
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")

@@ -205,3 +205,38 @@ class ToolExecutionBlockedError(AriaError):
                 "risk_factors": risk_factors or [],
             },
         )
+
+
+# === Learning System Exceptions (Phase 5) ===
+
+
+class LearningError(AriaError):
+    """자기 학습 시스템 베이스 예외
+
+    학습 실패는 메인 파이프라인을 방해하면 안 됨
+    BaseLearner.safe_analyze()에서 catch → graceful degradation
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "LEARNING_ERROR",
+        learner: str = "",
+    ) -> None:
+        super().__init__(
+            message,
+            code=code,
+            details={"learner": learner},
+        )
+
+
+class LearningAnalysisError(LearningError):
+    """학습 분석 실패 (LLM 호출 실패 / JSON 파싱 실패 등)"""
+
+    def __init__(self, message: str, *, learner: str = "") -> None:
+        super().__init__(
+            message,
+            code="LEARNING_ANALYSIS_ERROR",
+            learner=learner,
+        )
