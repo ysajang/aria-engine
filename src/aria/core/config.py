@@ -482,6 +482,41 @@ class LearningConfig(BaseSettings):
     )
 
 
+class ProductConnectorConfig(BaseSettings):
+    """범용 제품 연동 모듈 설정 (Phase 3.5)
+
+    환경변수 prefix: ARIA_PRODUCT_
+    """
+
+    model_config = SettingsConfigDict(env_prefix="ARIA_PRODUCT_", env_file=_get_env_file(), extra="ignore")
+
+    enabled: bool = Field(default=True, description="Product Connector 전체 활성화")
+    registry_path: str = Field(
+        default="./products",
+        description="제품 레지스트리 저장 경로",
+    )
+    auto_monitor: bool = Field(
+        default=True,
+        description="제품 등록 시 모니터링 자동 시작",
+    )
+    healthcheck_interval_minutes: int = Field(
+        default=5,
+        ge=1,
+        le=60,
+        description="헬스체크 주기 (분)",
+    )
+    seo_check_interval_hours: int = Field(
+        default=24,
+        ge=1,
+        le=168,
+        description="SEO 점검 주기 (시간)",
+    )
+
+    @property
+    def is_configured(self) -> bool:
+        return self.enabled
+
+
 class AriaConfig(BaseSettings):
     """ARIA 통합 설정"""
 
@@ -507,6 +542,7 @@ class AriaConfig(BaseSettings):
     event: EventConfig = Field(default_factory=EventConfig)
     alert: AlertConfig = Field(default_factory=AlertConfig)
     learning: LearningConfig = Field(default_factory=LearningConfig)
+    product: ProductConnectorConfig = Field(default_factory=ProductConnectorConfig)
 
     # Provider API Keys (LiteLLM이 자동 참조)
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")

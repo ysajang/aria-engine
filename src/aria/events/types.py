@@ -20,7 +20,30 @@ from pydantic import BaseModel, Field, field_validator
 
 
 # === 허용된 소스 목록 ===
-VALID_SOURCES = frozenset({"testorum", "talksim", "autotube", "trendbot", "aria"})
+# DEFAULT_SOURCES: 항상 유효한 기본 소스 (센서/내부 시스템)
+# _registered_sources: ProductRegistry가 동적으로 추가/제거하는 제품 소스
+DEFAULT_SOURCES: frozenset[str] = frozenset({"aria", "trendbot", "autotube", "talksim", "testorum"})
+_registered_sources: set[str] = set()
+
+
+def get_valid_sources() -> frozenset[str]:
+    """현재 유효한 전체 소스 목록 (기본 + 등록된 제품)"""
+    return frozenset(DEFAULT_SOURCES | _registered_sources)
+
+
+def register_event_source(source: str) -> None:
+    """이벤트 소스 동적 추가 (ProductRegistry에서 호출)"""
+    _registered_sources.add(source.lower().strip())
+
+
+def unregister_event_source(source: str) -> None:
+    """이벤트 소스 동적 제거 (ProductRegistry에서 호출)"""
+    _registered_sources.discard(source.lower().strip())
+
+
+# 하위 호환: 기존 코드에서 VALID_SOURCES를 직접 참조하는 경우 대비
+# 단 frozenset이 아닌 프로퍼티이므로 변경 시 get_valid_sources() 사용 권장
+VALID_SOURCES = DEFAULT_SOURCES
 
 
 class EventSeverity(str, Enum):
@@ -77,12 +100,13 @@ class EventInput(BaseModel):
     @field_validator("source")
     @classmethod
     def validate_source(cls, v: str) -> str:
-        """허용된 소스만 수용"""
+        """허용된 소스만 수용 (기본 + 동적 등록된 제품)"""
         v_lower = v.lower().strip()
-        if v_lower not in VALID_SOURCES:
+        valid = get_valid_sources()
+        if v_lower not in valid:
             raise ValueError(
                 f"유효하지 않은 소스: '{v}'. "
-                f"허용 목록: {', '.join(sorted(VALID_SOURCES))}"
+                f"허용 목록: {', '.join(sorted(valid))}"
             )
         return v_lower
 
@@ -171,6 +195,7 @@ class EventQuery(BaseModel):
     def validate_source(cls, v: str | None) -> str | None:
         if v is not None:
             v = v.lower().strip()
-            if v not in VALID_SOURCES:
+            valid = get_valid_sources()
+            if v not in valid:
                 raise ValueError(f"유효하지 않은 소스: '{v}'")
         return v
