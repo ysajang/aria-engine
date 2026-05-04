@@ -25,6 +25,7 @@ from aria.learning.types import (
 )
 from aria.learning.base import BaseLearner
 from aria.learning.conversation_learner import ConversationLearner
+from aria.learning.feedback_loop import FeedbackLoop
 
 __all__ = [
     "BaseLearner",
@@ -33,6 +34,7 @@ __all__ = [
     "CorrectionRecord",
     "CorrectionType",
     "DomainInsight",
+    "FeedbackLoop",
     "LearningEventType",
     "PatternType",
     "Preference",
