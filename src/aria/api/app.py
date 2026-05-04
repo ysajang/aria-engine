@@ -71,6 +71,7 @@ from aria.tools.builtin import MemoryReadTool, MemoryWriteTool, KnowledgeSearchT
 from aria.events.event_store import EventStore
 from aria.events.types import EventIngestRequest, EventIngestResponse, EventQuery
 from aria.alerts.alert_manager import AlertManager
+from aria.learning.manager import LearningManager
 
 logger = structlog.get_logger()
 
@@ -83,6 +84,7 @@ memory_loader: MemoryLoader | None = None
 tool_registry: ToolRegistry | None = None
 event_store: EventStore | None = None
 alert_manager: AlertManager | None = None
+learning_manager: LearningManager | None = None
 
 
 @asynccontextmanager
@@ -90,6 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """애플리케이션 시작/종료 시 초기화"""
     global llm_provider, vector_store, react_agent, rate_limiter
     global index_manager, memory_loader, tool_registry, event_store, alert_manager
+    global learning_manager
 
     config = get_config()
 
@@ -385,6 +388,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         window_seconds=60,
     )
 
+    # Self-Learning System (Phase 5)
+    if config.learning.enabled:
+        learning_manager = LearningManager(
+            llm=llm_provider,
+            event_store=event_store,
+            index_manager=index_manager,
+            config=config,
+        )
+    else:
+        logger.info("learning_system_disabled")
+
     logger.info(
         "aria_engine_started",
         env=config.api.env.value,
@@ -397,6 +411,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         event_store_path=config.event.base_path,
         alerts_enabled=alert_manager.enabled,
         monitoring_enabled=config.monitoring.is_configured,
+        learning_enabled=config.learning.enabled,
     )
     yield
 
@@ -801,6 +816,16 @@ async def query_agent(
         ))
         # 성공 시 에러 카운터 리셋
         alert_manager.reset_error_counter()
+
+    # Self-Learning: 비동기 학습 훅 (비차단 — 메인 응답 지연 없음)
+    if learning_manager and learning_manager.enabled:
+        asyncio.create_task(learning_manager.post_query_hook(
+            query=request.query,
+            answer=result["answer"],
+            confidence=result["confidence"],
+            scope=request.scope,
+            tool_calls_made=result.get("tool_calls_made", 0),
+        ))
 
     return QueryResponse(
         answer=result["answer"],
@@ -1281,3 +1306,18 @@ async def alert_stats() -> JSONResponse:
             content={"error": "SERVICE_UNAVAILABLE", "message": "Alert Manager 미초기화"},
         )
     return JSONResponse(content=alert_manager.get_stats())
+
+
+@app.get(
+    "/v1/learning/stats",
+    summary="학습 시스템 통계",
+    dependencies=[Depends(verify_api_key)],
+)
+async def learning_stats() -> JSONResponse:
+    """Self-Learning 시스템 통합 통계 (Phase 5)"""
+    if learning_manager is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "SERVICE_UNAVAILABLE", "message": "Learning Manager 미초기화"},
+        )
+    return JSONResponse(content=learning_manager.get_stats())

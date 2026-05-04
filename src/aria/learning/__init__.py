@@ -29,6 +29,7 @@ from aria.learning.feedback_loop import FeedbackLoop
 from aria.learning.tool_optimizer import ToolOptimizer
 from aria.learning.prompt_improver import PromptImprover
 from aria.learning.pattern_predictor import PatternPredictor
+from aria.learning.manager import LearningManager
 
 __all__ = [
     "BaseLearner",
@@ -39,6 +40,7 @@ __all__ = [
     "DomainInsight",
     "FeedbackLoop",
     "LearningEventType",
+    "LearningManager",
     "PatternPredictor",
     "PatternType",
     "Preference",
