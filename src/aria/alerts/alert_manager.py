@@ -734,6 +734,111 @@ class AlertManager:
         )
         return await self._send_alert(alert)
 
+    async def check_user_bounce_rate(
+        self,
+        product_label: str | None,
+        bounce_rate: float,
+        sessions: int,
+        period_days: int = 7,
+    ) -> Alert | None:
+        """이탈률 알림 (Phase 3.5 Step 7)"""
+        if not self.enabled:
+            return None
+
+        if bounce_rate < 70.0:
+            return None
+
+        level = AlertLevel.CRITICAL if bounce_rate >= 85.0 else AlertLevel.WARNING
+        label = f"[{product_label}] " if product_label else ""
+
+        alert = Alert(
+            alert_type=AlertType.USER_BOUNCE_RATE,
+            level=level,
+            title=f"이탈률 높음 — {label}GA4",
+            message=(
+                f"이탈률: {bounce_rate:.1f}%\n"
+                f"세션: {sessions:,}건\n"
+                f"기간: {period_days}일"
+            ),
+            data={
+                "bounce_rate": bounce_rate,
+                "sessions": sessions,
+            },
+        )
+        return await self._send_alert(alert)
+
+    async def check_user_conversion_drop(
+        self,
+        product_label: str | None,
+        current_rate: float,
+        previous_rate: float,
+        rate_change_pct: float,
+        conversion_event: str = "purchase",
+        period_days: int = 7,
+    ) -> Alert | None:
+        """전환율 하락 알림 (Phase 3.5 Step 7)"""
+        if not self.enabled:
+            return None
+
+        if rate_change_pct > -20.0:
+            return None
+
+        level = AlertLevel.CRITICAL if rate_change_pct <= -40.0 else AlertLevel.WARNING
+        label = f"[{product_label}] " if product_label else ""
+
+        alert = Alert(
+            alert_type=AlertType.USER_CONVERSION_DROP,
+            level=level,
+            title=f"전환율 하락 — {label}{conversion_event}",
+            message=(
+                f"전환율: {previous_rate:.2f}% → {current_rate:.2f}%\n"
+                f"변화: {rate_change_pct:.1f}%\n"
+                f"기간: {period_days}일"
+            ),
+            data={
+                "current_rate": current_rate,
+                "previous_rate": previous_rate,
+                "change_pct": rate_change_pct,
+                "event": conversion_event,
+            },
+        )
+        return await self._send_alert(alert)
+
+    async def check_user_funnel_bottleneck(
+        self,
+        product_label: str | None,
+        bottleneck_step: str,
+        dropoff_pct: float,
+        from_step: str,
+        from_users: int,
+        to_users: int,
+    ) -> Alert | None:
+        """퍼널 병목 알림 (Phase 3.5 Step 7)"""
+        if not self.enabled:
+            return None
+
+        if dropoff_pct < 50.0:
+            return None
+
+        level = AlertLevel.CRITICAL if dropoff_pct >= 70.0 else AlertLevel.WARNING
+        label = f"[{product_label}] " if product_label else ""
+
+        alert = Alert(
+            alert_type=AlertType.USER_FUNNEL_BOTTLENECK,
+            level=level,
+            title=f"퍼널 병목 — {label}{bottleneck_step}",
+            message=(
+                f"'{from_step}' → '{bottleneck_step}'\n"
+                f"이탈: {dropoff_pct:.1f}% ({from_users:,} → {to_users:,}명)"
+            ),
+            data={
+                "bottleneck": bottleneck_step,
+                "dropoff_pct": dropoff_pct,
+                "from_step": from_step,
+            },
+        )
+        return await self._send_alert(alert)
+
     # === Internal ===
 
     def _is_in_cooldown(self, alert_type: AlertType) -> bool:

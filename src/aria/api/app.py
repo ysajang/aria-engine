@@ -296,6 +296,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from aria.tools.mcp.payment_monitor_tools import PaymentAuditTool
         tool_registry.register_executor(PaymentAuditTool())
         logger.info("payment_audit_tool_registered", tools=1)
+
+        # 사용자 행동 분석 도구 (Product Connector Phase 3.5 Step 7)
+        from aria.tools.mcp.behavior_monitor_tools import BehaviorAuditTool
+        behavior_tool = BehaviorAuditTool(
+            token_manager=locals().get("google_token_mgr"),
+        )
+        tool_registry.register_executor(behavior_tool)
+        logger.info("behavior_audit_tool_registered", tools=1)
     else:
         logger.info("monitoring_tools_skipped", reason="ARIA_MONITOR_ENABLED=false")
 
@@ -1384,6 +1392,49 @@ async def _evaluate_monitoring_event(event: Any) -> None:
                     top_reasons=churn.get("top_cancel_reasons"),
                     period_days=churn.get("period_days", 30),
                 )
+
+        elif et == "behavior_audit":
+            overview = data.get("overview", {})
+            conversion = data.get("conversion", {})
+            funnel = data.get("funnel", {})
+
+            # 이탈률 알림
+            bounce_rate = overview.get("bounce_rate", 0)
+            if bounce_rate >= 70.0:
+                await alert_manager.check_user_bounce_rate(
+                    product_label=product_label,
+                    bounce_rate=bounce_rate,
+                    sessions=overview.get("sessions", 0),
+                    period_days=overview.get("period_days", 7),
+                )
+
+            # 전환율 하락 알림
+            rate_change = conversion.get("rate_change_pct", 0)
+            if rate_change <= -20.0:
+                await alert_manager.check_user_conversion_drop(
+                    product_label=product_label,
+                    current_rate=conversion.get("current_rate", 0),
+                    previous_rate=conversion.get("previous_rate", 0),
+                    rate_change_pct=rate_change,
+                    conversion_event=conversion.get("conversion_event", "purchase"),
+                    period_days=conversion.get("period_days", 7),
+                )
+
+            # 퍼널 병목 알림
+            steps = funnel.get("funnel_steps", [])
+            for step in steps:
+                dropoff = step.get("dropoff_pct", 0)
+                if dropoff >= 50.0 and step.get("step", 0) > 1:
+                    prev_idx = step["step"] - 2
+                    from_step = steps[prev_idx].get("event", "?") if prev_idx >= 0 else "?"
+                    await alert_manager.check_user_funnel_bottleneck(
+                        product_label=product_label,
+                        bottleneck_step=step.get("event", "?"),
+                        dropoff_pct=dropoff,
+                        from_step=from_step,
+                        from_users=steps[prev_idx].get("users", 0) if prev_idx >= 0 else 0,
+                        to_users=step.get("users", 0),
+                    )
 
     except Exception as e:
         # 알림 평가 실패는 이벤트 인입에 영향 없음

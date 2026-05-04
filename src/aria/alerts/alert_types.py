@@ -47,6 +47,10 @@ class AlertType(str, Enum):
     PAYMENT_REFUND_SPIKE = "payment_refund_spike"           # 환불율 급증
     PAYMENT_FAILURE_RATE = "payment_failure_rate"             # 결제 실패율 높음
     SUBSCRIPTION_CHURN = "subscription_churn"                 # 구독 이탈률 높음
+    # --- 사용자 행동 분석 (Phase 3.5 Step 7) ---
+    USER_BOUNCE_RATE = "user_bounce_rate"                     # 이탈률 높음
+    USER_CONVERSION_DROP = "user_conversion_drop"             # 전환율 하락
+    USER_FUNNEL_BOTTLENECK = "user_funnel_bottleneck"         # 퍼널 병목
 
 
 # 알림별 텔레그램 이모지 매핑
@@ -68,6 +72,9 @@ ALERT_EMOJI: dict[AlertType, str] = {
     AlertType.PAYMENT_REFUND_SPIKE: "💸",
     AlertType.PAYMENT_FAILURE_RATE: "❌",
     AlertType.SUBSCRIPTION_CHURN: "📉",
+    AlertType.USER_BOUNCE_RATE: "🚪",
+    AlertType.USER_CONVERSION_DROP: "📉",
+    AlertType.USER_FUNNEL_BOTTLENECK: "🔻",
 }
 
 # 알림별 기본 쿨다운 (초)
@@ -89,6 +96,9 @@ DEFAULT_COOLDOWNS: dict[AlertType, int] = {
     AlertType.PAYMENT_REFUND_SPIKE: 3600,  # 1시간
     AlertType.PAYMENT_FAILURE_RATE: 1800,   # 30분
     AlertType.SUBSCRIPTION_CHURN: 86400,    # 24시간 (변화 느림)
+    AlertType.USER_BOUNCE_RATE: 86400,      # 24시간 (일 1회)
+    AlertType.USER_CONVERSION_DROP: 86400,   # 24시간
+    AlertType.USER_FUNNEL_BOTTLENECK: 86400, # 24시간
 }
 
 
