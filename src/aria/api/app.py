@@ -26,6 +26,7 @@ REST API 엔드포인트
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -314,6 +315,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from aria.tools.mcp.report_tools import WeeklyReportTool
         tool_registry.register_executor(WeeklyReportTool())
         logger.info("weekly_report_tool_registered", tools=1)
+
+        # AI 개인화 도구 (Phase B)
+        from aria.monitoring.insight_store import InsightStore
+        from aria.tools.mcp.insight_tools import ProductInsightTool, SnapshotRecordTool
+        insight_store = InsightStore(backup_dir=os.path.expanduser("~/.aria/insights"))
+        insight_store.load_backup()
+        tool_registry.register_executor(ProductInsightTool(insight_store))
+        tool_registry.register_executor(SnapshotRecordTool(insight_store))
+        logger.info("insight_tools_registered", tools=2)
     else:
         logger.info("monitoring_tools_skipped", reason="ARIA_MONITOR_ENABLED=false")
 
