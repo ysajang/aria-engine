@@ -304,6 +304,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         tool_registry.register_executor(behavior_tool)
         logger.info("behavior_audit_tool_registered", tools=1)
+
+        # 비용 최적화 도구 (Product Connector Phase 3.5 Step 8)
+        from aria.tools.mcp.cost_monitor_tools import CostAuditTool
+        tool_registry.register_executor(CostAuditTool())
+        logger.info("cost_audit_tool_registered", tools=1)
     else:
         logger.info("monitoring_tools_skipped", reason="ARIA_MONITOR_ENABLED=false")
 
@@ -1435,6 +1440,26 @@ async def _evaluate_monitoring_event(event: Any) -> None:
                         from_users=steps[prev_idx].get("users", 0) if prev_idx >= 0 else 0,
                         to_users=step.get("users", 0),
                     )
+
+        elif et == "cost_audit":
+            # Vercel/Supabase 사용량 이슈 → 알림
+            for provider_key in ("vercel", "supabase"):
+                provider_data = data.get(provider_key, {})
+                usage_pct = provider_data.get("usage_pct", {})
+                plan_limits = provider_data.get("plan_limits", {})
+                for resource, pct in usage_pct.items():
+                    if pct >= 70.0:
+                        limit_val = plan_limits.get(resource, 0)
+                        # used 값 역산
+                        used_val = (pct / 100.0) * limit_val if limit_val > 0 else 0
+                        await alert_manager.check_infra_cost_high(
+                            provider=provider_key,
+                            product_label=product_label,
+                            resource=resource,
+                            usage_pct=pct,
+                            used=round(used_val, 2),
+                            limit=limit_val,
+                        )
 
     except Exception as e:
         # 알림 평가 실패는 이벤트 인입에 영향 없음

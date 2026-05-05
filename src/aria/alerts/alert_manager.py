@@ -839,6 +839,41 @@ class AlertManager:
         )
         return await self._send_alert(alert)
 
+    async def check_infra_cost_high(
+        self,
+        provider: str,
+        product_label: str | None,
+        resource: str,
+        usage_pct: float,
+        used: float,
+        limit: float,
+    ) -> Alert | None:
+        """인프라 사용량 알림 (Phase 3.5 Step 8)"""
+        if not self.enabled:
+            return None
+
+        if usage_pct < 70.0:
+            return None
+
+        level = AlertLevel.CRITICAL if usage_pct >= 90.0 else AlertLevel.WARNING
+        label = f"[{product_label}] " if product_label else ""
+
+        alert = Alert(
+            alert_type=AlertType.INFRA_COST_HIGH,
+            level=level,
+            title=f"인프라 사용량 높음 — {label}{provider}",
+            message=(
+                f"{resource}: {usage_pct:.0f}% 사용\n"
+                f"사용: {used} / 한도: {limit}"
+            ),
+            data={
+                "provider": provider,
+                "resource": resource,
+                "usage_pct": usage_pct,
+            },
+        )
+        return await self._send_alert(alert)
+
     # === Internal ===
 
     def _is_in_cooldown(self, alert_type: AlertType) -> bool:

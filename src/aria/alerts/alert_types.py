@@ -51,6 +51,8 @@ class AlertType(str, Enum):
     USER_BOUNCE_RATE = "user_bounce_rate"                     # 이탈률 높음
     USER_CONVERSION_DROP = "user_conversion_drop"             # 전환율 하락
     USER_FUNNEL_BOTTLENECK = "user_funnel_bottleneck"         # 퍼널 병목
+    # --- 비용 최적화 (Phase 3.5 Step 8) ---
+    INFRA_COST_HIGH = "infra_cost_high"                       # 인프라 사용량 높음 (Vercel/Supabase)
 
 
 # 알림별 텔레그램 이모지 매핑
@@ -75,6 +77,7 @@ ALERT_EMOJI: dict[AlertType, str] = {
     AlertType.USER_BOUNCE_RATE: "🚪",
     AlertType.USER_CONVERSION_DROP: "📉",
     AlertType.USER_FUNNEL_BOTTLENECK: "🔻",
+    AlertType.INFRA_COST_HIGH: "💲",
 }
 
 # 알림별 기본 쿨다운 (초)
@@ -99,6 +102,7 @@ DEFAULT_COOLDOWNS: dict[AlertType, int] = {
     AlertType.USER_BOUNCE_RATE: 86400,      # 24시간 (일 1회)
     AlertType.USER_CONVERSION_DROP: 86400,   # 24시간
     AlertType.USER_FUNNEL_BOTTLENECK: 86400, # 24시간
+    AlertType.INFRA_COST_HIGH: 86400,       # 24시간 (일 1회)
 }
 
 
