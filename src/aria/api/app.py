@@ -324,6 +324,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         tool_registry.register_executor(ProductInsightTool(insight_store))
         tool_registry.register_executor(SnapshotRecordTool(insight_store))
         logger.info("insight_tools_registered", tools=2)
+
+        # 추가 모니터링 v2 — 프론트엔드 에러 / 웹훅 대조 / API Contract
+        from aria.tools.mcp.frontend_monitor_tools import FrontendErrorAnalyzeTool
+        from aria.tools.mcp.webhook_monitor_tools import WebhookReconciliationTool
+        from aria.tools.mcp.contract_test_tools import ApiContractTestTool
+        tool_registry.register_executor(FrontendErrorAnalyzeTool(event_store=event_store))
+        tool_registry.register_executor(WebhookReconciliationTool())
+        tool_registry.register_executor(ApiContractTestTool())
+        logger.info("monitoring_v2_tools_registered", tools=3)
     else:
         logger.info("monitoring_tools_skipped", reason="ARIA_MONITOR_ENABLED=false")
 
@@ -1476,6 +1485,47 @@ async def _evaluate_monitoring_event(event: Any) -> None:
                             limit=limit_val,
                         )
 
+        elif et == "frontend_error":
+            # 프론트엔드 JS 에러 → 스파이크 감지 (제품 소스에서 수신)
+            error_count = data.get("error_count", 1)
+            # 단건 이벤트는 축적 후 스파이크 감지 (cron에서 처리)
+            # severity=error면 즉시 알림
+            severity_val = getattr(event, "severity", None)
+            if severity_val and severity_val.value == "error":
+                await alert_manager.check_frontend_error_spike(
+                    product_id=event.source,
+                    error_count=error_count,
+                    top_error=data.get("message", ""),
+                )
+
+        elif et == "webhook_reconciliation":
+            # 웹훅 누락 감지 결과
+            missing_count = data.get("missing_count", 0)
+            if missing_count > 0:
+                await alert_manager.check_webhook_missing(
+                    product_id=product_label or event.source,
+                    provider=data.get("provider", "unknown"),
+                    missing_count=missing_count,
+                    missing_order_ids=data.get("missing_order_ids"),
+                )
+
+        elif et == "api_contract_test":
+            # API 스키마 검증 실패
+            failed_count = data.get("failed_count", 0)
+            if failed_count > 0:
+                results = data.get("results", [])
+                first_fail = next((r for r in results if not r.get("passed")), {})
+                await alert_manager.check_api_contract_fail(
+                    product_id=product_label or event.source,
+                    failed_count=failed_count,
+                    total_count=data.get("total_count", 0),
+                    first_failure_url=first_fail.get("url"),
+                    first_failure_reason=(
+                        first_fail.get("issues", [{}])[0].get("message")
+                        if first_fail.get("issues") else None
+                    ),
+                )
+
     except Exception as e:
         # 알림 평가 실패는 이벤트 인입에 영향 없음
         logger.warning(
@@ -1513,7 +1563,19 @@ async def ingest_events(request: EventIngestRequest) -> JSONResponse:
         # 모니터링 이벤트 자동 알림 평가
         if alert_manager and alert_manager.enabled:
             for event in events:
-                if event.source == "aria":
+                # aria 소스: 기존 모니터링 이벤트
+                # 제품 소스: 프론트엔드 에러 / severity=critical 실시간 처리
+                event_type = getattr(event, "event_type", "")
+                severity = getattr(event, "severity", None)
+                severity_val = severity.value if severity else ""
+
+                should_evaluate = (
+                    event.source == "aria"
+                    or event_type in ("frontend_error", "webhook_reconciliation", "api_contract_test")
+                    or severity_val == "error"  # severity=error → 실시간 critical 알림
+                )
+
+                if should_evaluate:
                     asyncio.create_task(
                         _evaluate_monitoring_event(event)
                     )

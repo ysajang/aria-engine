@@ -53,6 +53,10 @@ class AlertType(str, Enum):
     USER_FUNNEL_BOTTLENECK = "user_funnel_bottleneck"         # 퍼널 병목
     # --- 비용 최적화 (Phase 3.5 Step 8) ---
     INFRA_COST_HIGH = "infra_cost_high"                       # 인프라 사용량 높음 (Vercel/Supabase)
+    # --- 추가 모니터링 v2 ---
+    FRONTEND_ERROR_SPIKE = "frontend_error_spike"             # 프론트엔드 JS 에러 급증
+    WEBHOOK_MISSING = "webhook_missing"                       # 결제 웹훅 누락 감지
+    API_CONTRACT_FAIL = "api_contract_fail"                   # API 응답 스키마 위반
 
 
 # 알림별 텔레그램 이모지 매핑
@@ -78,6 +82,9 @@ ALERT_EMOJI: dict[AlertType, str] = {
     AlertType.USER_CONVERSION_DROP: "📉",
     AlertType.USER_FUNNEL_BOTTLENECK: "🔻",
     AlertType.INFRA_COST_HIGH: "💲",
+    AlertType.FRONTEND_ERROR_SPIKE: "🖥️",
+    AlertType.WEBHOOK_MISSING: "🔗",
+    AlertType.API_CONTRACT_FAIL: "📋",
 }
 
 # 알림별 기본 쿨다운 (초)
@@ -103,6 +110,9 @@ DEFAULT_COOLDOWNS: dict[AlertType, int] = {
     AlertType.USER_CONVERSION_DROP: 86400,   # 24시간
     AlertType.USER_FUNNEL_BOTTLENECK: 86400, # 24시간
     AlertType.INFRA_COST_HIGH: 86400,       # 24시간 (일 1회)
+    AlertType.FRONTEND_ERROR_SPIKE: 600,    # 10분 (실시간 감지)
+    AlertType.WEBHOOK_MISSING: 300,         # 5분 (결제 누락은 긴급)
+    AlertType.API_CONTRACT_FAIL: 3600,      # 1시간
 }
 
 

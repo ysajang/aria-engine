@@ -874,6 +874,110 @@ class AlertManager:
         )
         return await self._send_alert(alert)
 
+    async def check_frontend_error_spike(
+        self,
+        product_id: str,
+        error_count: int,
+        window_minutes: int = 10,
+        top_error: str | None = None,
+    ) -> Alert | None:
+        """프론트엔드 에러 급증 알림"""
+        if not self.enabled:
+            return None
+
+        if error_count < 10:
+            return None
+
+        level = AlertLevel.CRITICAL if error_count >= 50 else AlertLevel.WARNING
+        detail = f"\n주요 에러: {top_error[:100]}" if top_error else ""
+
+        alert = Alert(
+            alert_type=AlertType.FRONTEND_ERROR_SPIKE,
+            level=level,
+            title=f"프론트엔드 에러 급증 — [{product_id}]",
+            message=(
+                f"{window_minutes}분 내 {error_count}건 발생{detail}"
+            ),
+            data={
+                "product_id": product_id,
+                "error_count": error_count,
+                "window_minutes": window_minutes,
+            },
+        )
+        return await self._send_alert(alert)
+
+    async def check_webhook_missing(
+        self,
+        product_id: str,
+        provider: str,
+        missing_count: int,
+        missing_order_ids: list[str] | None = None,
+    ) -> Alert | None:
+        """결제 웹훅 누락 알림"""
+        if not self.enabled:
+            return None
+
+        if missing_count == 0:
+            return None
+
+        level = AlertLevel.CRITICAL if missing_count >= 3 else AlertLevel.WARNING
+        ids_str = ", ".join((missing_order_ids or [])[:5])
+
+        alert = Alert(
+            alert_type=AlertType.WEBHOOK_MISSING,
+            level=level,
+            title=f"웹훅 누락 감지 — [{product_id}] {provider}",
+            message=(
+                f"{missing_count}건 웹훅 미도착 (유예 시간 초과)\n"
+                f"주문 ID: {ids_str}" if ids_str else f"{missing_count}건 웹훅 미도착"
+            ),
+            data={
+                "product_id": product_id,
+                "provider": provider,
+                "missing_count": missing_count,
+            },
+        )
+        return await self._send_alert(alert)
+
+    async def check_api_contract_fail(
+        self,
+        product_id: str,
+        failed_count: int,
+        total_count: int,
+        first_failure_url: str | None = None,
+        first_failure_reason: str | None = None,
+    ) -> Alert | None:
+        """API Contract 테스트 실패 알림"""
+        if not self.enabled:
+            return None
+
+        if failed_count == 0:
+            return None
+
+        fail_rate = failed_count / max(total_count, 1) * 100
+        level = AlertLevel.CRITICAL if fail_rate >= 50 else AlertLevel.WARNING
+
+        detail = ""
+        if first_failure_url:
+            detail = f"\n실패 엔드포인트: {first_failure_url}"
+        if first_failure_reason:
+            detail += f"\n사유: {first_failure_reason[:100]}"
+
+        alert = Alert(
+            alert_type=AlertType.API_CONTRACT_FAIL,
+            level=level,
+            title=f"API 스키마 위반 — [{product_id}]",
+            message=(
+                f"{failed_count}/{total_count}건 실패 ({fail_rate:.0f}%){detail}"
+            ),
+            data={
+                "product_id": product_id,
+                "failed_count": failed_count,
+                "total_count": total_count,
+            },
+        )
+        return await self._send_alert(alert)
+
     # === Internal ===
 
     def _is_in_cooldown(self, alert_type: AlertType) -> bool:
