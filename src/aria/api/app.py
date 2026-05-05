@@ -309,6 +309,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from aria.tools.mcp.cost_monitor_tools import CostAuditTool
         tool_registry.register_executor(CostAuditTool())
         logger.info("cost_audit_tool_registered", tools=1)
+
+        # 주간 리포트 도구 (Product Connector Phase 3.5 Step 9)
+        from aria.tools.mcp.report_tools import WeeklyReportTool
+        tool_registry.register_executor(WeeklyReportTool())
+        logger.info("weekly_report_tool_registered", tools=1)
     else:
         logger.info("monitoring_tools_skipped", reason="ARIA_MONITOR_ENABLED=false")
 
