@@ -120,6 +120,12 @@ class WorkflowRunner:
                 # output_key가 있으면 context에 저장
                 if step.output_key and result.output is not None:
                     ctx.set(step.output_key, result.output)
+                    # dict 출력이면 top-level에도 spread (템플릿 접근 편의)
+                    # 기존 키는 덮어쓰지 않음 (충돌 방지)
+                    if isinstance(result.output, dict):
+                        for k, v in result.output.items():
+                            if k not in ctx.data:
+                                ctx.set(k, v)
             elif result.skipped:
                 steps_skipped += 1
             else:
