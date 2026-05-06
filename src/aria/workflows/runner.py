@@ -507,8 +507,7 @@ class WorkflowRunner:
                     "error": result.error,
                 },
             )
-            stored = event.to_event()
-            await self._event_store.store(stored)
+            self._event_store.ingest(event)
         except Exception as e:
             logger.error("workflow_event_record_failed", error=str(e)[:200])
 

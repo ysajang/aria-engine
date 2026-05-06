@@ -80,6 +80,11 @@ def create_bot(config: TelegramConfig, transcriber: Any | None = None) -> Applic
     app.add_handler(CommandHandler("health", handlers.health))
     app.add_handler(CommandHandler("briefing", handlers.briefing))
 
+    # 워크플로우 명령어 핸들러
+    app.add_handler(CommandHandler("workflows", handlers.workflows_command))
+    app.add_handler(CommandHandler("marketing", handlers.marketing_command))
+    app.add_handler(CommandHandler("admin", handlers.admin_command))
+
     # HITL 콜백 핸들러 (인라인 키보드 승인/거부)
     app.add_handler(CallbackQueryHandler(handlers.handle_confirmation_callback))
 

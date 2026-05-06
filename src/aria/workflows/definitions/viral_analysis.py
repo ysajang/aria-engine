@@ -39,7 +39,7 @@ def build_viral_analysis(
 
         from aria.events.types import EventQuery
 
-        events = await event_store.query(EventQuery(
+        events = event_store.query(EventQuery(
             source="testorum",
             since=since,
             limit=500,

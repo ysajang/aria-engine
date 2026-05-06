@@ -82,6 +82,22 @@ class ARIAClient:
         """대기 도구 거부"""
         return await self._delete(f"/v1/tools/pending/{confirmation_id}")
 
+    async def list_workflows(self, category: str | None = None) -> dict[str, Any]:
+        """워크플로우 목록 조회"""
+        path = "/v1/workflows"
+        if category:
+            path += f"?category={category}"
+        return await self._get(path)
+
+    async def execute_workflow(
+        self,
+        workflow_id: str,
+        initial_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """워크플로우 실행"""
+        payload = {"initial_data": initial_data or {}}
+        return await self._post(f"/v1/workflows/{workflow_id}/execute", payload)
+
     async def _get(self, path: str) -> dict[str, Any]:
         """GET 요청"""
         url = f"{self.base_url}{path}"

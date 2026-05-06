@@ -78,7 +78,7 @@ def build_tax_summary(
             from aria.events.types import EventQuery
 
             for source in ["testorum", "talksim", "autotube", "aria"]:
-                events = await event_store.query(EventQuery(
+                events = event_store.query(EventQuery(
                     source=source,
                     since=since,
                     until=until,

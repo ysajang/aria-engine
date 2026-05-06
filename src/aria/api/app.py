@@ -115,6 +115,7 @@ alert_manager: AlertManager | None = None
 learning_manager: LearningManager | None = None
 product_registry: ProductRegistry | None = None
 context_bridge: ContextBridge | None = None
+workflow_registry: Any = None  # WorkflowRegistry (순환 import 방지)
 
 
 @asynccontextmanager
@@ -123,6 +124,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global llm_provider, vector_store, react_agent, rate_limiter
     global index_manager, memory_loader, tool_registry, event_store, alert_manager
     global learning_manager, product_registry, context_bridge
+    global workflow_registry
 
     config = get_config()
 
@@ -525,6 +527,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("mcp_server_disabled")
 
+    # === Workflow System ===
+    try:
+        from aria.workflows.setup import setup_workflows
+
+        workflow_registry = setup_workflows(
+            tool_registry=tool_registry,
+            event_store=event_store,
+            llm_provider=llm_provider,
+            templates_dir="./templates",
+        )
+        logger.info("workflow_system_ready", workflows=workflow_registry.count)
+    except Exception as e:
+        logger.error("workflow_setup_error", error=str(e)[:200])
+        workflow_registry = None
+
     logger.info(
         "aria_engine_started",
         env=config.api.env.value,
@@ -542,6 +559,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         products_active=product_registry.active_count if product_registry else 0,
         context_bridge_enabled=context_bridge is not None,
         mcp_server_enabled=config.mcp_server.is_configured,
+        workflows_registered=workflow_registry.count if workflow_registry else 0,
     )
     yield
 
@@ -2032,3 +2050,98 @@ async def context_pull(
                 "message": str(e),
             },
         )
+
+
+# ============================================================
+# Workflow Endpoints (마케팅/행정 자동화)
+# ============================================================
+
+
+def _require_workflow_registry():
+    """워크플로우 레지스트리 필수 확인"""
+    if workflow_registry is None:
+        raise AriaError(
+            "워크플로우 시스템이 초기화되지 않았습니다",
+            code="WORKFLOW_NOT_INITIALIZED",
+        )
+    return workflow_registry
+
+
+@app.get("/v1/workflows", tags=["workflows"])
+async def list_workflows(
+    category: str | None = None,
+    api_key: str = Depends(verify_api_key),
+) -> JSONResponse:
+    """등록된 워크플로우 목록 조회
+
+    Args:
+        category: 필터 (marketing / admin / None=전체)
+    """
+    registry = _require_workflow_registry()
+
+    if category:
+        workflows = registry.list_by_category(category)
+    else:
+        workflows = registry.list_all()
+
+    return JSONResponse(content={
+        "workflows": [
+            {
+                "workflow_id": w.workflow_id,
+                "name": w.name,
+                "description": w.description,
+                "category": w.category,
+                "steps": len(w.steps),
+            }
+            for w in workflows
+        ],
+        "total": len(workflows),
+    })
+
+
+@app.post("/v1/workflows/{workflow_id}/execute", tags=["workflows"])
+async def execute_workflow(
+    workflow_id: str,
+    request: Request,
+    api_key: str = Depends(verify_api_key),
+) -> JSONResponse:
+    """워크플로우 실행
+
+    Body (optional JSON):
+        initial_data: dict — 워크플로우 초기 데이터
+    """
+    registry = _require_workflow_registry()
+
+    # Body 파싱 (비어있어도 허용)
+    initial_data = {}
+    try:
+        body = await request.json()
+        initial_data = body.get("initial_data", body)
+    except Exception:
+        pass
+
+    try:
+        result = await registry.execute(workflow_id, initial_data)
+    except ValueError as e:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "WORKFLOW_NOT_FOUND", "message": str(e)},
+        )
+    except Exception as e:
+        logger.error("workflow_execution_error", workflow_id=workflow_id, error=str(e)[:300])
+        return JSONResponse(
+            status_code=500,
+            content={"error": "WORKFLOW_EXECUTION_FAILED", "message": str(e)[:500]},
+        )
+
+    return JSONResponse(content={
+        "workflow_id": result.workflow_id,
+        "status": result.status.value,
+        "steps_completed": result.steps_completed,
+        "steps_total": result.steps_total,
+        "steps_skipped": result.steps_skipped,
+        "duration_ms": result.duration_ms,
+        "error": result.error,
+        "report": result.outputs.get("report", result.outputs.get("confirmation", "")),
+    })
+

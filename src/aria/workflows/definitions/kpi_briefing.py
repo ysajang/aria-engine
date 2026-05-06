@@ -23,7 +23,7 @@ from aria.workflows.types import (
 
 def build_kpi_briefing(
     event_store: Any = None,
-    aria_client: Any = None,
+    llm_provider: Any = None,
     **kwargs: Any,
 ) -> tuple[WorkflowDefinition, dict[str, WorkflowFunc]]:
     """KPI 브리핑 워크플로우 빌드"""
@@ -43,7 +43,7 @@ def build_kpi_briefing(
             if event_store:
                 from aria.events.types import EventQuery
 
-                events = await event_store.query(EventQuery(
+                events = event_store.query(EventQuery(
                     source=source,
                     since=since,
                     until=until,
@@ -66,19 +66,20 @@ def build_kpi_briefing(
 
             products_data.append({"name": source.capitalize(), "kpis": kpis})
 
-        # 비용 수집
+        # 비용 수집 — llm_provider.cost_tracker 직접 읽기 (HTTP 자기호출 X)
         daily_avg = 0.0
         weekly_total = 0.0
         monthly_total = 0.0
         monthly_limit = 300.0
 
-        if aria_client:
-            cost_data = await aria_client.get_cost()
-            if "error" not in cost_data:
-                monthly_total = cost_data.get("monthly_cost_usd", 0)
-                monthly_limit = cost_data.get("monthly_limit_usd", 300)
-                daily_avg = monthly_total / max(now.day, 1)
-                weekly_total = daily_avg * 7
+        if llm_provider and hasattr(llm_provider, "cost_tracker"):
+            tracker = llm_provider.cost_tracker
+            monthly_total = getattr(tracker, "monthly_cost", 0.0)
+            daily_avg = monthly_total / max(now.day, 1)
+            weekly_total = daily_avg * 7
+
+            if hasattr(llm_provider, "config") and hasattr(llm_provider.config, "cost_control"):
+                monthly_limit = llm_provider.config.cost_control.monthly_cost_limit_usd
 
         ctx.set("period", f"{week_ago.strftime('%m/%d')} ~ {now.strftime('%m/%d')}")
 

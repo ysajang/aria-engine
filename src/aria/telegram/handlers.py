@@ -78,7 +78,10 @@ class ARIAHandlers:
             "/cost — API 비용 현황\n"
             "/memory — 메모리 인덱스\n"
             "/health — 서버 상태\n"
-            "/briefing — 즉시 브리핑\n\n"
+            "/briefing — 즉시 브리핑\n"
+            "/workflows — 워크플로우 목록\n"
+            "/marketing — 마케팅 자동화\n"
+            "/admin — 행정 자동화\n\n"
             "자유롭게 질문하세요!",
             parse_mode="Markdown",
         )
@@ -99,6 +102,12 @@ class ARIAHandlers:
             "`/memory testorum` — 특정 스코프 조회\n"
             "`/health` — ARIA 서버 상태 확인\n"
             "`/briefing` — 즉시 브리핑 받기\n\n"
+            "*워크플로우 자동화*\n"
+            "`/workflows` — 전체 워크플로우 목록\n"
+            "`/marketing` — 마케팅 워크플로우 목록\n"
+            "`/marketing competitor-monitor` — 경쟁사 모니터링\n"
+            "`/admin kpi-briefing` — 주간 KPI\n"
+            "`/admin schedule 내일 3시 미팅` — 일정 생성\n\n"
             "*스코프 지정*\n"
             "`@testorum 질문` — Testorum 스코프로 질문\n"
             "`@talksim 질문` — Talksim 스코프로 질문",
@@ -194,6 +203,134 @@ class ARIAHandlers:
             await update.message.reply_text(text, parse_mode="Markdown")
         except Exception:
             await update.message.reply_text(text)
+
+    # === 워크플로우 명령어 ===
+
+    async def workflows_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/workflows [category] — 등록된 워크플로우 목록"""
+        if not self._is_authorized(update):
+            return
+
+        category = context.args[0] if context.args else None
+        data = await self.client.list_workflows(category)
+
+        if "error" in data:
+            await update.message.reply_text(f"❌ 조회 실패: {data['message']}")
+            return
+
+        workflows = data.get("workflows", [])
+        if not workflows:
+            await update.message.reply_text("등록된 워크플로우가 없습니다.")
+            return
+
+        lines = ["🔧 *등록된 워크플로우*\n"]
+        current_cat = ""
+        for w in sorted(workflows, key=lambda x: (x.get("category", ""), x.get("workflow_id", ""))):
+            cat = w.get("category", "general")
+            if cat != current_cat:
+                current_cat = cat
+                emoji = {"marketing": "📢", "admin": "📋"}.get(cat, "🔧")
+                lines.append(f"\n{emoji} *{cat.upper()}*")
+            desc = w.get("description", w.get("name", ""))[:60]
+            lines.append(f"  `{w['workflow_id']}` — {desc}")
+
+        lines.append(f"\n_총 {len(workflows)}개_")
+        lines.append("\n실행: `/marketing [id]` 또는 `/admin [id]`")
+
+        try:
+            await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text("\n".join(lines))
+
+    async def marketing_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/marketing [workflow_id] — 마케팅 워크플로우 실행"""
+        if not self._is_authorized(update):
+            return
+        await self._run_workflow(update, context, category="marketing")
+
+    async def admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/admin [workflow_id] [args...] — 행정 워크플로우 실행
+
+        예: /admin schedule 내일 3시 미팅
+            /admin kpi
+            /admin tax
+        """
+        if not self._is_authorized(update):
+            return
+        await self._run_workflow(update, context, category="admin")
+
+    async def _run_workflow(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        category: str,
+    ) -> None:
+        """워크플로우 실행 공통 로직"""
+        if not context.args:
+            # 워크플로우 목록 표시
+            data = await self.client.list_workflows(category)
+            if "error" not in data:
+                workflows = data.get("workflows", [])
+                if workflows:
+                    lines = [f"사용 가능한 {category} 워크플로우:\n"]
+                    for w in workflows:
+                        lines.append(f"  `{w['workflow_id']}` — {w.get('description', '')[:50]}")
+                    lines.append(f"\n실행: `/{category} [id]`")
+                    try:
+                        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+                    except Exception:
+                        await update.message.reply_text("\n".join(lines))
+                else:
+                    await update.message.reply_text(f"등록된 {category} 워크플로우가 없습니다.")
+            return
+
+        workflow_id = context.args[0]
+        extra_text = " ".join(context.args[1:]) if len(context.args) > 1 else ""
+
+        # 초기 데이터 구성
+        initial_data = {}
+        if extra_text:
+            initial_data["text"] = extra_text
+
+        thinking_msg = await update.message.reply_text(f"⏳ `{workflow_id}` 실행 중...", parse_mode="Markdown")
+
+        data = await self.client.execute_workflow(workflow_id, initial_data)
+
+        try:
+            await thinking_msg.delete()
+        except Exception:
+            pass
+
+        if "error" in data and data.get("error") != None:
+            status = data.get("status", "")
+            if status == "failed":
+                await update.message.reply_text(
+                    f"❌ `{workflow_id}` 실패\n{data.get('error', '')[:300]}",
+                    parse_mode="Markdown",
+                )
+            elif data.get("error") == "WORKFLOW_NOT_FOUND":
+                await update.message.reply_text(f"❌ 워크플로우를 찾을 수 없습니다: `{workflow_id}`", parse_mode="Markdown")
+            else:
+                await update.message.reply_text(f"❌ 실행 오류: {data.get('message', '')[:300]}")
+            return
+
+        # 성공 — report가 있으면 report 표시, 없으면 요약
+        report = data.get("report", "")
+        status = data.get("status", "completed")
+        emoji = {"completed": "✅", "partial": "⚠️", "failed": "❌"}.get(status, "❓")
+
+        if report:
+            try:
+                await update.message.reply_text(report, parse_mode="Markdown")
+            except Exception:
+                await update.message.reply_text(report)
+        else:
+            steps = f"{data.get('steps_completed', 0)}/{data.get('steps_total', 0)}"
+            ms = data.get('duration_ms', 0)
+            await update.message.reply_text(
+                f"{emoji} `{workflow_id}` 완료 ({steps} 스텝 / {ms:.0f}ms)",
+                parse_mode="Markdown",
+            )
 
     # === 일반 메시지 핸들러 ===
 

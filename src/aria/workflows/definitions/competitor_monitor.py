@@ -109,7 +109,7 @@ def build_competitor_monitor(
                 from datetime import timedelta
 
                 since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-                events = await event_store.query(EventQuery(
+                events = event_store.query(EventQuery(
                     source="aria",
                     event_type="competitor_change",
                     since=since,
@@ -144,8 +144,7 @@ def build_competitor_monitor(
                             "title": change.get("title", ""),
                         },
                     )
-                    stored = ev.to_event()
-                    await event_store.store(stored)
+                    event_store.ingest(ev)
             except Exception:
                 pass
 
