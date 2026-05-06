@@ -932,6 +932,7 @@ async def query_agent(
     _client_id: str = Depends(verify_api_key),
 ) -> QueryResponse:
     """ARIA 에이전트에게 질문 (메모리 자동 주입)"""
+    logger.info("query_received", query=request.query, scope=request.scope)
     if react_agent is None:
         raise HTTPException(status_code=503, detail="Agent not initialized")
 
@@ -2144,4 +2145,3 @@ async def execute_workflow(
         "error": result.error,
         "report": result.outputs.get("report", result.outputs.get("confirmation", "")),
     })
-
