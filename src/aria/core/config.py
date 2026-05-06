@@ -517,6 +517,63 @@ class ProductConnectorConfig(BaseSettings):
         return self.enabled
 
 
+class ContextBridgeConfig(BaseSettings):
+    """External Context Bridge 설정 (Phase 3.6)
+
+    외부 AI 도구 ↔ ARIA 메모리 간 컨텍스트 교환
+    환경변수 prefix: ARIA_CONTEXT_
+    """
+
+    model_config = SettingsConfigDict(env_prefix="ARIA_CONTEXT_", env_file=_get_env_file(), extra="ignore")
+
+    enabled: bool = Field(default=True, description="Context Bridge 활성화")
+    max_messages_per_push: int = Field(
+        default=200,
+        ge=1,
+        le=500,
+        description="Push당 최대 메시지 수",
+    )
+    auto_analyze: bool = Field(
+        default=True,
+        description="Push 시 자동 분석 수행",
+    )
+    session_cache_size: int = Field(
+        default=1000,
+        ge=100,
+        le=10000,
+        description="세션 중복 감지 캐시 크기",
+    )
+    default_pull_budget: int = Field(
+        default=4000,
+        ge=500,
+        le=32000,
+        description="Pull 기본 토큰 예산",
+    )
+
+    @property
+    def is_configured(self) -> bool:
+        return self.enabled
+
+
+class MCPServerConfig(BaseSettings):
+    """MCP 서버 설정 (ARIA를 MCP 서버로 노출)
+
+    환경변수 prefix: ARIA_MCP_SERVER_
+    """
+
+    model_config = SettingsConfigDict(env_prefix="ARIA_MCP_SERVER_", env_file=_get_env_file(), extra="ignore")
+
+    enabled: bool = Field(default=True, description="MCP 서버 활성화")
+    expose_write_tools: bool = Field(
+        default=True,
+        description="쓰기 도구 노출 여부 (context_push 등)",
+    )
+
+    @property
+    def is_configured(self) -> bool:
+        return self.enabled
+
+
 class AriaConfig(BaseSettings):
     """ARIA 통합 설정"""
 
@@ -543,6 +600,8 @@ class AriaConfig(BaseSettings):
     alert: AlertConfig = Field(default_factory=AlertConfig)
     learning: LearningConfig = Field(default_factory=LearningConfig)
     product: ProductConnectorConfig = Field(default_factory=ProductConnectorConfig)
+    context_bridge: ContextBridgeConfig = Field(default_factory=ContextBridgeConfig)
+    mcp_server: MCPServerConfig = Field(default_factory=MCPServerConfig)
 
     # Provider API Keys (LiteLLM이 자동 참조)
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")

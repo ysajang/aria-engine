@@ -19,6 +19,9 @@ REST API 엔드포인트
 - GET /v1/products/{product_id} → 제품 상세
 - PATCH /v1/products/{product_id} → 제품 수정
 - DELETE /v1/products/{product_id} → 제품 해제
+- POST /v1/context/push → 외부 컨텍스트 인입
+- GET /v1/context/pull → 컨텍스트 마크다운 반환
+- POST /mcp → MCP 서버 (JSON-RPC 2.0)
 - 글로벌 에러 핸들러 → 구조화된 에러 응답
 - Rate limiting → 요청 제한
 """
@@ -89,6 +92,14 @@ from aria.products.types import (
     ProductUpdateRequest,
 )
 from aria.events.types import register_event_source, unregister_event_source
+from aria.context.bridge import ContextBridge
+from aria.context.types import (
+    ContextPushRequest,
+    ContextPushResponse,
+    ContextPullRequest,
+    ContextPullResponse,
+)
+from aria.mcp.server import create_mcp_router
 
 logger = structlog.get_logger()
 
@@ -103,6 +114,7 @@ event_store: EventStore | None = None
 alert_manager: AlertManager | None = None
 learning_manager: LearningManager | None = None
 product_registry: ProductRegistry | None = None
+context_bridge: ContextBridge | None = None
 
 
 @asynccontextmanager
@@ -110,7 +122,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """애플리케이션 시작/종료 시 초기화"""
     global llm_provider, vector_store, react_agent, rate_limiter
     global index_manager, memory_loader, tool_registry, event_store, alert_manager
-    global learning_manager, product_registry
+    global learning_manager, product_registry, context_bridge
 
     config = get_config()
 
@@ -490,6 +502,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("learning_system_disabled")
 
+    # Context Bridge (Phase 3.6)
+    if config.context_bridge.is_configured:
+        context_bridge = ContextBridge(
+            index_manager=index_manager,
+            memory_loader=memory_loader,
+            event_store=event_store,
+        )
+        # app.state에 저장 (MCP 서버 도구에서 접근)
+        app.state.context_bridge = context_bridge
+        app.state.index_manager = index_manager
+        app.state.memory_loader = memory_loader
+        logger.info("context_bridge_initialized")
+    else:
+        logger.info("context_bridge_disabled")
+
+    # MCP Server (Phase 3.6 — ARIA를 MCP 서버로 노출)
+    if config.mcp_server.is_configured:
+        mcp_router = create_mcp_router()
+        app.include_router(mcp_router)
+        logger.info("mcp_server_enabled", endpoint="/mcp")
+    else:
+        logger.info("mcp_server_disabled")
+
     logger.info(
         "aria_engine_started",
         env=config.api.env.value,
@@ -505,6 +540,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         learning_enabled=config.learning.enabled,
         products_registered=product_registry.product_count if product_registry else 0,
         products_active=product_registry.active_count if product_registry else 0,
+        context_bridge_enabled=context_bridge is not None,
+        mcp_server_enabled=config.mcp_server.is_configured,
     )
     yield
 
@@ -1889,5 +1926,109 @@ async def unregister_product(product_id: str) -> JSONResponse:
                 "error": "PRODUCT_NOT_FOUND",
                 "message": str(e),
                 "product_id": e.product_id,
+            },
+        )
+
+
+# === Context Bridge Endpoints (Phase 3.6) ===
+
+def _require_context_bridge() -> ContextBridge:
+    """ContextBridge 인스턴스 필수 확인"""
+    if context_bridge is None:
+        raise HTTPException(status_code=503, detail="Context bridge not initialized")
+    return context_bridge
+
+
+@app.post(
+    "/v1/context/push",
+    summary="외부 컨텍스트 인입",
+    dependencies=[Depends(verify_api_key)],
+)
+async def context_push(request: ContextPushRequest) -> JSONResponse:
+    """외부 AI 도구의 대화 로그를 ARIA 메모리에 흡수
+
+    1. 이벤트 저장 (원본 보존)
+    2. 규칙 기반 분석 (LLM 0)
+    3. 인사이트 → 메모리 upsert
+
+    session_id로 중복 인입 방지
+    """
+    bridge = _require_context_bridge()
+
+    try:
+        response = await bridge.push(request)
+
+        logger.info(
+            "context_push_completed",
+            source=request.source,
+            scope=request.scope,
+            messages=len(request.messages),
+            insights=response.insights_extracted,
+            memory_updated=response.memory_updated,
+        )
+
+        return JSONResponse(content=response.model_dump(mode="json"))
+
+    except Exception as e:
+        logger.error(
+            "context_push_error",
+            source=request.source,
+            scope=request.scope,
+            error=str(e),
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "CONTEXT_PUSH_FAILED",
+                "message": str(e),
+            },
+        )
+
+
+@app.get(
+    "/v1/context/pull",
+    summary="컨텍스트 마크다운 반환",
+    dependencies=[Depends(verify_api_key)],
+)
+async def context_pull(
+    scope: str = "global",
+    domains: str | None = None,
+    token_budget: int = 4000,
+    format: str = "markdown",
+) -> JSONResponse:
+    """ARIA 메모리에서 스코프별 컨텍스트를 마크다운으로 반환
+
+    외부 도구의 시스템 프롬프트에 주입할 용도
+    """
+    bridge = _require_context_bridge()
+
+    try:
+        # domains 쿼리 파라미터 파싱 (쉼표 구분)
+        domain_list = None
+        if domains:
+            domain_list = [d.strip() for d in domains.split(",") if d.strip()]
+
+        pull_request = ContextPullRequest(
+            scope=scope,
+            domains=domain_list,
+            token_budget=min(token_budget, 32000),
+            format=format,
+        )
+
+        response = await bridge.pull(pull_request)
+
+        return JSONResponse(content=response.model_dump(mode="json"))
+
+    except Exception as e:
+        logger.error(
+            "context_pull_error",
+            scope=scope,
+            error=str(e),
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "CONTEXT_PULL_FAILED",
+                "message": str(e),
             },
         )
