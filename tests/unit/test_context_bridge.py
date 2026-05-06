@@ -759,41 +759,35 @@ class TestMCPProtocol:
         resp = _handle_tools_list("req-1")
         body = json.loads(resp.body)
         tools = body["result"]["tools"]
-        assert len(tools) == 5
+        assert len(tools) == 1
 
         tool_names = {t["name"] for t in tools}
-        assert "aria_memory_read" in tool_names
-        assert "aria_memory_list" in tool_names
-        assert "aria_context_push" in tool_names
-        assert "aria_context_pull" in tool_names
-        assert "aria_knowledge_search" in tool_names
+        assert tool_names == {"aria_context_push"}
 
 
 class TestMCPTools:
-    """MCP 도구 정의 테스트"""
+    """MCP 도구 정의 테스트 (쓰기 전용)"""
 
     def test_tool_count(self):
-        assert len(MCP_TOOLS) == 5
+        assert len(MCP_TOOLS) == 1
 
-    def test_all_tools_have_schema(self):
-        for tool in MCP_TOOLS:
-            assert "name" in tool
-            assert "description" in tool
-            assert "inputSchema" in tool
-            assert tool["inputSchema"]["type"] == "object"
+    def test_only_push_tool_exposed(self):
+        tool_names = {t["name"] for t in MCP_TOOLS}
+        assert tool_names == {"aria_context_push"}
 
-    def test_memory_read_requires_domain(self):
-        tool = next(t for t in MCP_TOOLS if t["name"] == "aria_memory_read")
-        assert "domain" in tool["inputSchema"]["required"]
+    def test_read_tools_not_exposed(self):
+        tool_names = {t["name"] for t in MCP_TOOLS}
+        assert "aria_memory_read" not in tool_names
+        assert "aria_memory_list" not in tool_names
+        assert "aria_context_pull" not in tool_names
+        assert "aria_knowledge_search" not in tool_names
 
-    def test_context_push_requires_source_messages(self):
-        tool = next(t for t in MCP_TOOLS if t["name"] == "aria_context_push")
+    def test_push_tool_has_schema(self):
+        tool = MCP_TOOLS[0]
+        assert tool["name"] == "aria_context_push"
+        assert "inputSchema" in tool
         assert "source" in tool["inputSchema"]["required"]
         assert "messages" in tool["inputSchema"]["required"]
-
-    def test_knowledge_search_requires_query(self):
-        tool = next(t for t in MCP_TOOLS if t["name"] == "aria_knowledge_search")
-        assert "query" in tool["inputSchema"]["required"]
 
 
 class TestMCPServerRouter:
@@ -852,7 +846,8 @@ class TestMCPServerRouter:
             "params": {},
         })
         body = resp.json()
-        assert len(body["result"]["tools"]) == 5
+        assert len(body["result"]["tools"]) == 1
+        assert body["result"]["tools"][0]["name"] == "aria_context_push"
 
     def test_notification_no_response(self):
         app = self._create_test_app()
@@ -875,7 +870,7 @@ class TestMCPServerRouter:
         body = resp.json()
         assert body["error"]["code"] == -32601
 
-    def test_tool_call_memory_read_not_initialized(self):
+    def test_read_tool_memory_read_blocked(self):
         app = self._create_test_app()
         client = TestClient(app)
         resp = client.post("/mcp", json={
@@ -888,14 +883,60 @@ class TestMCPServerRouter:
             },
         })
         body = resp.json()
-        assert "not initialized" in body["result"]["content"][0]["text"]
+        assert "Blocked" in body["result"]["content"][0]["text"]
+        assert body["result"]["isError"] is True
+
+    def test_read_tool_memory_list_blocked(self):
+        app = self._create_test_app()
+        client = TestClient(app)
+        resp = client.post("/mcp", json={
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "aria_memory_list",
+                "arguments": {},
+            },
+        })
+        body = resp.json()
+        assert "Blocked" in body["result"]["content"][0]["text"]
+
+    def test_read_tool_context_pull_blocked(self):
+        app = self._create_test_app()
+        client = TestClient(app)
+        resp = client.post("/mcp", json={
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "aria_context_pull",
+                "arguments": {},
+            },
+        })
+        body = resp.json()
+        assert "Blocked" in body["result"]["content"][0]["text"]
+
+    def test_read_tool_knowledge_search_blocked(self):
+        app = self._create_test_app()
+        client = TestClient(app)
+        resp = client.post("/mcp", json={
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "aria_knowledge_search",
+                "arguments": {"query": "test"},
+            },
+        })
+        body = resp.json()
+        assert "Blocked" in body["result"]["content"][0]["text"]
 
     def test_tool_call_missing_name(self):
         app = self._create_test_app()
         client = TestClient(app)
         resp = client.post("/mcp", json={
             "jsonrpc": "2.0",
-            "id": 5,
+            "id": 8,
             "method": "tools/call",
             "params": {"arguments": {}},
         })
@@ -907,7 +948,7 @@ class TestMCPServerRouter:
         client = TestClient(app)
         resp = client.post("/mcp", json={
             "jsonrpc": "2.0",
-            "id": 6,
+            "id": 9,
             "method": "tools/call",
             "params": {
                 "name": "nonexistent_tool",
@@ -916,53 +957,6 @@ class TestMCPServerRouter:
         })
         body = resp.json()
         assert body["error"]["code"] == -32602
-
-    def test_tool_call_memory_read_with_manager(self):
-        app = self._create_test_app()
-
-        mock_manager = MagicMock()
-        mock_topic = MagicMock()
-        mock_topic.content = "# User Profile\n- Name: test"
-        mock_manager.get_topic.return_value = mock_topic
-        app.state.index_manager = mock_manager
-
-        client = TestClient(app)
-        resp = client.post("/mcp", json={
-            "jsonrpc": "2.0",
-            "id": 7,
-            "method": "tools/call",
-            "params": {
-                "name": "aria_memory_read",
-                "arguments": {"scope": "global", "domain": "user-profile"},
-            },
-        })
-        body = resp.json()
-        assert "User Profile" in body["result"]["content"][0]["text"]
-
-    def test_tool_call_memory_list_with_manager(self):
-        app = self._create_test_app()
-
-        mock_manager = MagicMock()
-        mock_index = MagicMock()
-        mock_entry = MagicMock()
-        mock_entry.summary = "사용자 프로필"
-        mock_entry.version = 1
-        mock_index.entries = {"user-profile": mock_entry}
-        mock_manager.get_index.return_value = mock_index
-        app.state.index_manager = mock_manager
-
-        client = TestClient(app)
-        resp = client.post("/mcp", json={
-            "jsonrpc": "2.0",
-            "id": 8,
-            "method": "tools/call",
-            "params": {
-                "name": "aria_memory_list",
-                "arguments": {"scope": "global"},
-            },
-        })
-        body = resp.json()
-        assert "user-profile" in body["result"]["content"][0]["text"]
 
 
 # ============================================================
@@ -995,7 +989,6 @@ class TestMCPServerConfig:
     def test_defaults(self):
         config = MCPServerConfig()
         assert config.enabled is True
-        assert config.expose_write_tools is True
 
     def test_is_configured(self):
         assert MCPServerConfig(enabled=True).is_configured is True

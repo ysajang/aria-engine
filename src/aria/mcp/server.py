@@ -7,18 +7,13 @@
 인증: Bearer 토큰 (ARIA_API_KEY 재사용)
 프로토콜: JSON-RPC 2.0 (MCP 2025-03-26 spec)
 
-노출 도구:
-    - aria_memory_read: 메모리 토픽 읽기
-    - aria_memory_list: 메모리 인덱스 조회
-    - aria_context_push: 외부 대화 로그 인입
-    - aria_context_pull: 컨텍스트 마크다운 반환
-    - aria_knowledge_search: 벡터+BM25 하이브리드 검색
+노출 도구 (쓰기 전용 — 읽기 차단):
+    - aria_context_push: 외부 대화 로그 인입 + 메모리 upsert
 
-설계 원칙:
-    - 기존 FastAPI 앱에 라우터로 마운트 (별도 서버 불필요)
-    - ARIA API 인증 재사용 (X-API-Key 또는 Bearer)
-    - JSON-RPC 2.0 strict compliance
-    - 읽기 전용 도구만 기본 노출 (쓰기는 선택적)
+차단 도구 (보안 정책):
+    - aria_memory_read / aria_memory_list / aria_context_pull / aria_knowledge_search
+    - 이유: MCP 연결 시 데이터가 외부 LLM 서버를 경유하므로 ARIA 메모리 읽기 차단
+    - ARIA 메모리 읽기는 /v1/context/pull REST API로만 가능 (로컬 전용)
 """
 
 from __future__ import annotations
@@ -37,41 +32,9 @@ MCP_PROTOCOL_VERSION = "2025-03-26"
 MCP_SERVER_NAME = "aria-engine"
 MCP_SERVER_VERSION = "0.3.0"
 
-# 노출할 도구 정의
+# 노출할 도구 정의 — 쓰기(push)만 허용 / 읽기(memory_read/list/pull/search) 차단
+# 이유: MCP 연결 시 외부 LLM 서버를 경유하므로 ARIA 메모리 읽기는 보안 리스크
 MCP_TOOLS: list[dict[str, Any]] = [
-    {
-        "name": "aria_memory_read",
-        "description": "ARIA 메모리에서 특정 도메인의 토픽 내용을 읽습니다",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "scope": {
-                    "type": "string",
-                    "description": "메모리 스코프 (global/testorum/talksim/autotube)",
-                    "default": "global",
-                },
-                "domain": {
-                    "type": "string",
-                    "description": "토픽 도메인명 (예: user-profile, coding-conventions)",
-                },
-            },
-            "required": ["domain"],
-        },
-    },
-    {
-        "name": "aria_memory_list",
-        "description": "ARIA 메모리 인덱스를 조회합니다 (모든 도메인 목록 + 요약)",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "scope": {
-                    "type": "string",
-                    "description": "메모리 스코프",
-                    "default": "global",
-                },
-            },
-        },
-    },
     {
         "name": "aria_context_push",
         "description": "현재 대화 내용을 ARIA 메모리에 저장합니다 (자동 분석 + upsert)",
@@ -110,54 +73,6 @@ MCP_TOOLS: list[dict[str, Any]] = [
                 },
             },
             "required": ["source", "messages"],
-        },
-    },
-    {
-        "name": "aria_context_pull",
-        "description": "ARIA 메모리에서 컨텍스트를 가져옵니다 (시스템 프롬프트 주입용 마크다운)",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "scope": {
-                    "type": "string",
-                    "description": "메모리 스코프",
-                    "default": "global",
-                },
-                "domains": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "특정 도메인만 로딩 (비어있으면 전체)",
-                },
-                "token_budget": {
-                    "type": "integer",
-                    "description": "토큰 예산 (기본 4000)",
-                    "default": 4000,
-                },
-            },
-        },
-    },
-    {
-        "name": "aria_knowledge_search",
-        "description": "ARIA 지식 베이스에서 시맨틱 검색을 수행합니다",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "검색 쿼리",
-                },
-                "collection": {
-                    "type": "string",
-                    "description": "검색 대상 컬렉션",
-                    "default": "default",
-                },
-                "top_k": {
-                    "type": "integer",
-                    "description": "반환 결과 수 (기본 5)",
-                    "default": 5,
-                },
-            },
-            "required": ["query"],
         },
     },
 ]
@@ -288,19 +203,28 @@ async def _handle_tools_call(
     if not tool_name:
         return _jsonrpc_error(req_id, -32602, "Missing tool name")
 
+    # 보안: 읽기 도구 차단 (MCP 경유 시 외부 LLM 서버에 메모리 노출 방지)
+    _BLOCKED_READ_TOOLS = {
+        "aria_memory_read", "aria_memory_list",
+        "aria_context_pull", "aria_knowledge_search",
+    }
+
+    if tool_name in _BLOCKED_READ_TOOLS:
+        logger.warning(
+            "mcp_server_read_tool_blocked",
+            tool=tool_name,
+            reason="read tools disabled for security",
+        )
+        return _jsonrpc_response(req_id, {
+            "content": [{"type": "text", "text": f"Blocked: {tool_name} is disabled on MCP server (security policy — read tools not exposed)"}],
+            "isError": True,
+        })
+
     app = request.app
 
     try:
-        if tool_name == "aria_memory_read":
-            result = await _tool_memory_read(app, arguments)
-        elif tool_name == "aria_memory_list":
-            result = await _tool_memory_list(app, arguments)
-        elif tool_name == "aria_context_push":
+        if tool_name == "aria_context_push":
             result = await _tool_context_push(app, arguments)
-        elif tool_name == "aria_context_pull":
-            result = await _tool_context_pull(app, arguments)
-        elif tool_name == "aria_knowledge_search":
-            result = await _tool_knowledge_search(app, arguments)
         else:
             return _jsonrpc_error(
                 req_id, -32602,

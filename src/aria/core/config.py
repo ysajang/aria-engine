@@ -558,16 +558,14 @@ class ContextBridgeConfig(BaseSettings):
 class MCPServerConfig(BaseSettings):
     """MCP 서버 설정 (ARIA를 MCP 서버로 노출)
 
+    보안 정책: 쓰기(push)만 허용 / 읽기(memory_read/list/pull/search) 차단
+    이유: MCP 연결 시 데이터가 외부 LLM 서버를 경유하므로 메모리 읽기 차단
     환경변수 prefix: ARIA_MCP_SERVER_
     """
 
     model_config = SettingsConfigDict(env_prefix="ARIA_MCP_SERVER_", env_file=_get_env_file(), extra="ignore")
 
     enabled: bool = Field(default=True, description="MCP 서버 활성화")
-    expose_write_tools: bool = Field(
-        default=True,
-        description="쓰기 도구 노출 여부 (context_push 등)",
-    )
 
     @property
     def is_configured(self) -> bool:
