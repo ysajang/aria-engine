@@ -976,6 +976,12 @@ async def query_agent(
             tool_calls_made=result.get("tool_calls_made", 0),
         ))
 
+    logger.info("query_completed",
+            query=request.query[:80],
+            answer_preview=result["answer"][:100],
+            confidence=result["confidence"],
+            latency_ms=round(latency_ms, 2),
+            tool_calls=result.get("tool_calls_made", 0))
     return QueryResponse(
         answer=result["answer"],
         confidence=result["confidence"],
