@@ -527,6 +527,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info("mcp_server_disabled")
 
+    # Supabase MCP 서버 (복수 프로젝트 + read_only + PAT 인증)
+    if config.supabase.is_configured:
+        from aria.mcp.supabase_servers import (
+            get_supabase_mcp_configs,
+            connect_supabase_mcp_servers,
+        )
+        from aria.mcp.tool_bridge import MCPToolBridge
+
+        sb_configs = get_supabase_mcp_configs(
+            projects=config.supabase.parsed_projects,
+            read_only=config.supabase.read_only,
+        )
+        sb_clients = await connect_supabase_mcp_servers(
+            sb_configs, config.supabase.access_token,
+        )
+
+        if sb_clients:
+            sb_bridge = MCPToolBridge(tool_registry, override_existing=False)
+            total_sb_tools = 0
+            for client in sb_clients:
+                registered = await sb_bridge.register_server(client)
+                total_sb_tools += len(registered)
+            app_state_mcp_clients.extend(sb_clients)
+            logger.info(
+                "supabase_mcp_ready",
+                projects=len(sb_clients),
+                tools=total_sb_tools,
+            )
+        else:
+            logger.warning("supabase_mcp_no_servers_connected")
+    else:
+        logger.info("supabase_mcp_skipped", reason="ARIA_SUPABASE_* not configured")
+
     # === Workflow System ===
     try:
         from aria.workflows.setup import setup_workflows

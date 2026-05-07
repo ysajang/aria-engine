@@ -413,6 +413,39 @@ class MCPConfig(BaseSettings):
         return {s.strip().lower() for s in self.google_services.split(",") if s.strip().lower() in valid}
 
 
+class SupabaseMCPConfig(BaseSettings):
+    """Supabase MCP 서버 연결 설정
+
+    복수 프로젝트 지원: ARIA_SUPABASE_PROJECTS=name:ref,name:ref
+    read_only=true 필수 (프로덕션 안전)
+    """
+
+    model_config = SettingsConfigDict(env_prefix="ARIA_SUPABASE_", env_file=_get_env_file(), extra="ignore")
+
+    enabled: bool = Field(default=True, description="Supabase MCP 활성화")
+    access_token: str = Field(default="", description="Supabase PAT")
+    project_ref: str = Field(default="", description="단일 프로젝트 ID (하위호환)")
+    projects: str = Field(default="", description="복수 프로젝트: name:ref 쉼표 구분")
+    read_only: bool = Field(default=True, description="읽기 전용 모드")
+
+    @property
+    def is_configured(self) -> bool:
+        return self.enabled and bool(self.access_token) and (bool(self.project_ref) or bool(self.projects))
+
+    @property
+    def parsed_projects(self) -> dict[str, str]:
+        result: dict[str, str] = {}
+        if self.projects:
+            for entry in self.projects.split(","):
+                entry = entry.strip()
+                if ":" in entry:
+                    name, ref = entry.split(":", 1)
+                    result[name.strip()] = ref.strip()
+        elif self.project_ref:
+            result["default"] = self.project_ref
+        return result
+
+
 class LearningConfig(BaseSettings):
     """Self-Learning 시스템 설정 (Phase 5)"""
 
@@ -591,6 +624,7 @@ class AriaConfig(BaseSettings):
     google_maps: GoogleMapsConfig = Field(default_factory=GoogleMapsConfig)
     google_oauth: GoogleOAuthConfig = Field(default_factory=GoogleOAuthConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
+    supabase: SupabaseMCPConfig = Field(default_factory=SupabaseMCPConfig)
     stt: STTConfig = Field(default_factory=STTConfig)
     pc_command: PCCommandConfig = Field(default_factory=PCCommandConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
