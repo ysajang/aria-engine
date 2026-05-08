@@ -63,7 +63,10 @@ class TestSupabaseMCPMultiProject:
 
 
 class TestSupabaseMCPConfigEnv:
-    def test_config_class_exists(self):
+    def test_config_class_exists(self, monkeypatch):
+        monkeypatch.delenv("ARIA_SUPABASE_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("ARIA_SUPABASE_PROJECT_REF", raising=False)
+        monkeypatch.delenv("ARIA_SUPABASE_PROJECTS", raising=False)
         from aria.core.config import SupabaseMCPConfig
         cfg = SupabaseMCPConfig()
         assert cfg.enabled is True
@@ -72,7 +75,10 @@ class TestSupabaseMCPConfigEnv:
         assert cfg.project_ref == ""
         assert cfg.projects == ""
 
-    def test_not_configured_without_token(self):
+    def test_not_configured_without_token(self, monkeypatch):
+        monkeypatch.delenv("ARIA_SUPABASE_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("ARIA_SUPABASE_PROJECT_REF", raising=False)
+        monkeypatch.delenv("ARIA_SUPABASE_PROJECTS", raising=False)
         from aria.core.config import SupabaseMCPConfig
         cfg = SupabaseMCPConfig()
         assert cfg.is_configured is False
@@ -86,7 +92,10 @@ class TestSupabaseMCPConfigEnv:
         assert cfg.parsed_projects == {"testorum": "ref1", "talksim": "ref2"}
         assert cfg.is_configured is True
 
-    def test_parsed_projects_fallback_to_ref(self):
+    def test_parsed_projects_fallback_to_ref(self, monkeypatch):
+        monkeypatch.delenv("ARIA_SUPABASE_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("ARIA_SUPABASE_PROJECT_REF", raising=False)
+        monkeypatch.delenv("ARIA_SUPABASE_PROJECTS", raising=False)
         from aria.core.config import SupabaseMCPConfig
         cfg = SupabaseMCPConfig(
             access_token="test",
