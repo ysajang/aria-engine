@@ -264,6 +264,60 @@ _총 {{ changes | length }}건 감지_
 - description: {{ seo_description | truncate_smart(155) }}
 """,
 
+    "marketing/seo_blog_draft.md.j2": """\
+---
+title: "{{ seo_title | truncate_smart(60) }}"
+description: "{{ seo_description | truncate_smart(155) }}"
+keywords: {{ keywords | join(", ") }}
+date: {{ now | datetime_kst("%Y-%m-%d") }}
+category: {{ category | default("general") }}
+---
+
+# {{ title }}
+
+{{ draft_body }}
+
+---
+*키워드: {{ keywords | join(" · ") }}*
+""",
+
+    "marketing/sns_post_set.md.j2": """\
+📱 *SNS 포스팅 드래프트*
+📅 {{ now | datetime_kst }}
+주제: {{ topic }}
+
+{% for post in posts %}
+---
+*{{ post.platform | upper }}*
+{{ post.content }}
+{% if post.hashtags %}
+{{ post.hashtags }}
+{% endif %}
+{% if post.char_count is defined %}({{ post.char_count }}자){% endif %}
+{% endfor %}
+
+_총 {{ posts | length }}개 플랫폼 초안 생성_
+""",
+
+    "marketing/email_campaign.md.j2": """\
+📧 *이메일 캠페인 드래프트*
+📅 {{ now | datetime_kst }}
+캠페인: {{ campaign_name }}
+세그먼트: {{ segment_name }}
+수신자: {{ recipients | length }}명
+
+---
+제목: {{ subject }}
+
+{{ email_body }}
+
+{% if cta_url is defined and cta_url %}
+CTA: {{ cta_text | default("자세히 보기") }} → {{ cta_url }}
+{% endif %}
+---
+_발송 전 반드시 내용 검토 필요_
+""",
+
     # --- 행정 ---
 
     "admin/kpi_briefing.md.j2": """\

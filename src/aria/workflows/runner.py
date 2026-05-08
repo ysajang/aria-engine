@@ -331,7 +331,12 @@ class WorkflowRunner:
     async def _run_llm_call(self, config: dict[str, Any]) -> str:
         """LLM_CALL: LLMProvider.complete() — Haiku 우선
 
-        config: {"prompt": str, "system": str?, "model": str?}
+        config:
+            prompt: str (필수) — 사용자 프롬프트
+            system: str? — 시스템 프롬프트
+            model: str? — 모델 tier ("cheap"=Haiku / "default"=Sonnet)
+            max_tokens: int? — 최대 출력 토큰 (기본 2048)
+            temperature: float? — 생성 온도 (기본 0.7)
 
         주의: LLM은 최후 수단. 규칙/템플릿으로 안 되는 경우만 사용.
         """
@@ -344,12 +349,16 @@ class WorkflowRunner:
 
         system = config.get("system", "")
         # 기본 cheap 모델 (Haiku) 사용 — 워크플로우에서 Sonnet/Opus 금지
-        model = config.get("model") or "cheap"
+        model_tier = config.get("model") or "cheap"
+        max_tokens = config.get("max_tokens", 2048)
+        temperature = config.get("temperature", 0.7)
 
         result = await self._llm_provider.complete(
-            user_prompt=prompt,
+            prompt,
             system_prompt=system or None,
-            use_model=model,
+            model_tier=model_tier,
+            max_tokens=max_tokens,
+            temperature=temperature,
         )
 
         return result.get("content", "")

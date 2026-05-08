@@ -163,7 +163,7 @@ class TestRevenueReport:
 class TestSetupWithRevenue:
     def test_setup_includes_revenue(self):
         registry = setup_workflows()
-        assert registry.count == 7  # 기존 6 + revenue-report
+        assert registry.count == 10  # 기존 6 + revenue-report + seo/sns/email
         assert registry.get("revenue-report") is not None
 
     def test_admin_category_count(self):

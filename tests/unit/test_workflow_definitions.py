@@ -50,7 +50,7 @@ class TestAllBuilders:
             assert len(defn.steps) > 0, f"{builder.__name__} steps 비어있음"
 
     def test_all_builders_count(self):
-        assert len(ALL_BUILDERS) == 7
+        assert len(ALL_BUILDERS) == 10
 
     def test_no_duplicate_workflow_ids(self):
         ids = []
@@ -330,14 +330,14 @@ class TestSetupWorkflows:
     def test_setup_without_services(self):
         """서비스 없이 setup → 모든 워크플로우 등록"""
         registry = setup_workflows()
-        assert registry.count == 7
+        assert registry.count == 10
 
     def test_setup_categories(self):
         registry = setup_workflows()
         marketing = registry.list_by_category("marketing")
         admin = registry.list_by_category("admin")
-        assert len(marketing) == 2  # competitor-monitor, viral-analysis
-        assert len(admin) == 5  # kpi, schedule, invoice, tax
+        assert len(marketing) == 5  # competitor-monitor, viral-analysis + seo/sns/email
+        assert len(admin) == 5  # kpi, schedule, invoice, tax, revenue
 
     def test_setup_workflow_ids(self):
         registry = setup_workflows()
@@ -350,6 +350,9 @@ class TestSetupWorkflows:
             "schedule-manager",
             "kpi-briefing",
             "invoice-generator",
+            "seo-content",
+            "sns-posting",
+            "email-campaign",
         ])
         assert ids == expected
 
